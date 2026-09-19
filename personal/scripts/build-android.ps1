@@ -1,4 +1,4 @@
-<#
+﻿<#
     砚池 (Inkwell) —— Android 一键出包脚本
 
     产物：APK（src-tauri/gen/android/app/build/outputs/apk/*/release/）
