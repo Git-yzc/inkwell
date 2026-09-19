@@ -1,0 +1,50 @@
+# 统一换行符：仓库内一律 LF，检出时按文件类型处理
+* text=auto eol=lf
+
+# 源码
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.js    text eol=lf
+*.jsx   text eol=lf
+*.json  text eol=lf
+*.css   text eol=lf
+*.html  text eol=lf
+*.md    text eol=lf
+*.rs    text eol=lf
+*.toml  text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.nsh   text eol=lf
+
+# Windows 专有脚本必须是 CRLF
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# 二进制，禁止任何转换
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.ico   binary
+*.icns  binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
+*.epub  binary
+*.mobi  binary
+*.azw3  binary
+*.pdf   binary
+*.cbz   binary
+*.mdx   binary
+*.mdd   binary
+*.db    binary
+*.sqlite binary
+*.keystore binary
+*.jks   binary
+
+# 语言统计：把生成物和锁文件排除掉
+pnpm-lock.yaml linguist-generated=true
+Cargo.lock     linguist-generated=true

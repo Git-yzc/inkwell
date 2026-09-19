@@ -1,0 +1,7 @@
+@import "tailwindcss";
+
+/* 砚池 —— 主题变量。中文优先的字体栈，衬线体给正文阅读用。 */
+@theme {
+  --font-sans: "Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  --font-serif: "Source Han Serif SC", "Songti SC", "SimSun", Georgia, serif;
+}

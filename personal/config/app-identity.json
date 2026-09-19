@@ -1,0 +1,17 @@
+{
+  "displayNameZh": "砚池",
+  "displayNameEn": "Inkwell",
+  "productName": "Inkwell",
+  "identifier": "com.inkwell.reader",
+  "androidApplicationId": "com.inkwell.reader",
+  "mainBinaryName": "inkwell",
+  "dataDirName": "Inkwell",
+  "layout": {
+    "books": "books",
+    "covers": "covers",
+    "database": "library.db"
+  },
+  "locale": "zh-CN",
+  "targetPlatforms": ["windows-x64", "android-arm64"],
+  "minSdkVersion": 26
+}

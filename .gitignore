@@ -1,0 +1,77 @@
+# ---------------------------------------------------------------------------
+# myEpubReader — 个人自用电子书阅读器（基于 Readest）
+# 本文件在合并上游 readest/readest 后需与上游 .gitignore 手工合并一次。
+# ---------------------------------------------------------------------------
+
+# --- 依赖 ---
+node_modules/
+.pnpm-store/
+.pnpm-cache/
+.pnpm-state/
+.pnpm-debug.log*
+.toolchain/
+
+# --- Next.js 构建产物 ---
+.next/
+out/
+build/
+dist/
+.open-next/
+.next-env.d.ts
+next-env.d.ts
+sw.js
+workbox-*.js
+swe-worker-*.js
+
+# --- Tauri / Rust ---
+target/
+apps/readest-app/src-tauri/target/
+apps/readest-app/src-tauri/gen/
+**/*.rs.bk
+*.pdb
+
+# --- Android ---
+*.apk
+*.aab
+*.keystore
+!personal/keystore/.gitkeep
+.gradle/
+local.properties
+apps/readest-app/src-tauri/gen/android/.gradle/
+
+# --- 环境变量 / 密钥（严禁提交） ---
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.jks
+*.p12
+*.mobileprovision
+
+# --- 我们的私有层产物 ---
+# 工具链安装包下载缓存（VS 引导程序等，体积大且可重新下载）
+personal/tools/
+personal/build/
+personal/out/
+personal/tmp/
+personal/secrets/
+
+# --- 编辑器 / 系统 ---
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- 日志 / 临时 ---
+*.log
+!pnpm-debug.log
+npm-debug.log*
+yarn-error.log*
+*.tsbuildinfo
+coverage/
+playwright-report/
+test-results/
+/tmp/
