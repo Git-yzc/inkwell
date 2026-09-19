@@ -61,11 +61,63 @@
 > 事件延迟送达越过了 250ms 冷却）。此后 14 轮冷启动压测未复现，按「不引入不必要复杂度」
 > 暂不加码；若日后重现，可改用 `e.timeStamp`（事件产生时刻）而非 `Date.now()` 计时冷却。
 
-### 2.2 其他尚未实测的项
+### 2.2 🆕【待处理 · 最优先】Android 装上后启动即报 `Failed to request http://localhost:1420/`
+
+**现象**：签名后的 APK 已经能正常安装了，但一启动就只显示：
+
+```
+Failed to request http://localhost:1420/: error sending request for url (http://localhost:1420/)
+```
+
+**影响范围**：**只有 Android 有**，Windows 正常。
+
+**根因（已实证，不是猜测）**：Android 的 .so 是在**开发模式**下编译的 ——
+二进制里烧进了 devUrl，却没有内嵌前端资源。
+
+证据链：
+
+| 检查项 | Windows `inkwell.exe` | Android `libinkwell_lib.so` |
+| --- | --- | --- |
+| 二进制含 `localhost:1420` | 有 | **有**（devUrl 被烧了进去） |
+| 二进制含 `index-Bhf8T1nl.js` | **有** | **无** |
+| 二进制含 `index-ClehkLd5.css` | **有** | **无** |
+| Cargo build script 输出 | `cargo:dev=false` | `cargo:dev=true` |
+
+机制（读依赖源码得到，非推测）：
+
+- `tauri` 的 build.rs（`tauri-2.11.5/build.rs:255`）：
+  `let custom_protocol = has_feature("custom-protocol"); let dev = !custom_protocol;`
+- `tauri-build` 的 `is_dev()`（`tauri-build-2.6.3/src/lib.rs:425`）读 `DEP_TAURI_DEV`，
+  再由同文件 :519 的 `cfg_alias("dev", is_dev())` 决定走「内嵌资源」还是「连 devUrl」。
+- 本仓库 `src-tauri/Cargo.toml` **没有 `[features]` 段**，没有任何地方开启 `tauri/custom-protocol`。
+- Windows 走官方 CLI（`pnpm tauri build`）→ `dev=false`；
+  Android 走我们自建的 `src-tauri/tauri.js` shim（只调 `cargo build --release`，
+  不带官方 CLI 会加的特性）→ `dev=true`。
+  佐证：`target/aarch64-linux-android/release/build/` 下同时存在
+  `cargo:dev=true` 与 `cargo:dev=false` 两个 tauri 构建目录。
+
+**候选修复（动手时先验证再改）**：
+
+1. 给 `src-tauri/Cargo.toml` 补上官方模板的 features 段：
+   ```toml
+   [features]
+   # 生产构建必须开，否则会编译成开发模式、不内嵌前端资源
+   custom-protocol = ["tauri/custom-protocol"]
+   ```
+2. 让 `src-tauri/tauri.js` 在 `release` 时把该特性传给 cargo
+   （`--features custom-protocol` 与 `--features tauri/custom-protocol` 二选一，实测确认）。
+3. **重新出包后必须复核**（别只看构建成功）：
+   从 APK 里解出 `lib/arm64-v8a/libinkwell_lib.so`，确认其中**能搜到 `index-*.js`**。
+
+**验收标准**：APK 装上后直接打开书库，不需要任何本地服务在跑。
+
+---
+
+### 2.3 其他尚未实测的项
 
 | 项 | 说明 |
 | --- | --- |
-| Android 真机 | 已出包，但**未在真机上验证过**（本机无安卓设备）。下次务必实测一遍 |
+| Android 真机 | ✅ 0.1.0 签名包**已能安装**（本项已验证）；但启动报错，见 §2.2 |
 | `pnpm tauri dev` 热更新 | 一直走的 release 构建，开发模式的热更新流程未实测 |
 | 大书库性能 | 目前书本数量很少。书多了之后封面网格需要虚拟滚动 |
 
