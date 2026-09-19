@@ -86,6 +86,7 @@
 | 书库页白屏，报 React #185 | zustand 选择器每次返回新数组，引用永不相等 → 无限重渲染 | 选择器只收纯数据，组件侧用 `useMemo` 派生 |
 | `biome format` 改写了 submodule | `files.includes` 未排除 `packages/`，把第三方源码全重排了 | includes 里已加 `!**/packages`；**别删这条** |
 | 安装包装到奇怪的位置 | NSIS 的 `RestorePreviousInstallLocation` 会读注册表里上次的位置 | 删掉 `HKCU\Software\inkwell\Inkwell` 后重装 |
+| **Android 装不上，报 `packageinfo is null`** | 打出来的 APK **没有签名**（文件名带 `-unsigned`）。未签名在 Android 上是硬失败，不是「只提示未知来源」 | 配好 `src-tauri/gen/android/keystore.properties`；`build-android.ps1` 已加 `apksigner verify` 校验，未签名直接失败 |
 
 ---
 
@@ -177,11 +178,16 @@ myEpubReader/                     # 仓库目录（应用名是 Inkwell，二者
 | 产物 | 路径 | 大小 |
 | --- | --- | --- |
 | Windows 安装包 | `src-tauri/target/release/bundle/nsis/Inkwell_0.1.0_x64-setup.exe` | 2.65 MB |
-| Android APK（arm64，手机用） | `src-tauri/gen/android/app/build/outputs/apk/arm64/release/app-arm64-release-unsigned.apk` | 11 MB |
+| Android APK（arm64，手机用） | `src-tauri/gen/android/app/build/outputs/apk/arm64/release/app-arm64-release.apk` | 11 MB |
 | Android APK（universal，全架构） | 同上目录 `universal/release/` | 35 MB |
 
-> 🔓 **未签名**：Android 是 release-unsigned APK，安装时系统会提示"未知来源"。个人自用可接受；
-> 若要正式签名，见 `personal/keystore/`（证书已 gitignore）。
+> 🔐 **已签名**：Android 发布包用 `personal/keystore/inkwell.jks` 签名（证书与密码都已 gitignore，
+> 凭据另存于 `personal/keystore/credentials.txt`）。
+>
+> ⚠️ **未签名的 APK 是「装不上」，不是「只提示未知来源」**——安装器的 `getPackageArchiveInfo()`
+> 返回 null，用户只会看到 `packageinfo is null`。这是真踩过的坑：0.1.0 首次发布的两份 APK
+> 就是未签名的，下载后完全无法安装。`build-android.ps1` 现在会用 `apksigner verify` 硬性校验，
+> 未签名直接 `exit 1`，不再放行。
 >
 > 📄 **下一步做什么、已知问题怎么修，一律看 `docs/BACKLOG.md`** —— 不要凭印象开工。
 

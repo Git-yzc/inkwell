@@ -33,7 +33,7 @@
 | Android arm64 | `Inkwell-0.1.0-arm64.apk` | 绝大多数现代手机选这个 |
 | Android 通用 | `Inkwell-0.1.0-universal.apk` | 含全部架构，体积大，兼容性最好 |
 
-> Android 包为 **release-unsigned**（未签名），安装时系统会提示「未知来源」。个人自用属正常现象。
+> Android 包已用自签名证书签名，可直接安装。首次安装时系统会提示「未知来源」，允许即可。
 
 ---
 
