@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 
 import BookCard from '@/components/BookCard';
 import type { Book } from '@/lib/api';
-import { selectVisibleBooks, useLibrary, type SortKey } from '@/store/library';
+import { type SortKey, selectVisibleBooks, useLibrary } from '@/store/library';
 
 /** 与 backend library.rs 支持的格式保持一致。 */
 const BOOK_EXTENSIONS = ['epub', 'mobi', 'azw3', 'azw', 'fb2', 'cbz', 'pdf', 'txt', 'md'];

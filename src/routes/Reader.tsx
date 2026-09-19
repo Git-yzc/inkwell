@@ -1,16 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-
-import SettingsPanel from '@/features/reader/SettingsPanel';
-import TocPanel from '@/features/reader/TocPanel';
 import { ReaderEngine } from '@/features/reader/engine';
 import {
-  THEMES,
   type BookInfo,
   type RendererSettings,
+  THEMES,
   type TocItem,
 } from '@/features/reader/engine/types';
-import { api, readableError, type Book } from '@/lib/api';
+import SettingsPanel from '@/features/reader/SettingsPanel';
+import TocPanel from '@/features/reader/TocPanel';
+import { api, type Book, readableError } from '@/lib/api';
 import { formatPercent } from '@/lib/util';
 import { useReaderSettings } from '@/store/reader-settings';
 

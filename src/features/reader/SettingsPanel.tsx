@@ -1,8 +1,8 @@
 import {
-  FONT_CHOICES,
-  THEMES,
   type FlowMode,
+  FONT_CHOICES,
   type RendererSettings,
+  THEMES,
   type ThemeKey,
 } from '@/features/reader/engine/types';
 
