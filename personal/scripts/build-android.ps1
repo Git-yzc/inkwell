@@ -156,6 +156,31 @@ $apks = @(Get-ChildItem $apkRoot -Filter '*.apk' -Recurse -ErrorAction SilentlyC
 
 if ($apks.Count -eq 0) { Write-Bad ('未在 ' + $apkRoot + ' 找到 APK'); exit 1 }
 
+# ---- 签名校验（硬性）----
+# 未签名的 APK 在 Android 上**根本装不上**：安装器的 getPackageArchiveInfo() 返回 null，
+# 用户只会看到 "packageinfo is null"。所以这里拦住，绝不放未签名的包出去。
+$apksigner = $null
+$btRoot = Join-Path $env:ANDROID_HOME 'build-tools'
+if (Test-Path $btRoot) {
+    $bt = Get-ChildItem $btRoot -Directory | Sort-Object Name -Descending | Select-Object -First 1
+    if ($bt) { $apksigner = Join-Path $bt.FullName 'apksigner.bat' }
+}
+if ($apksigner -and (Test-Path $apksigner)) {
+    $unsigned = @()
+    foreach ($a in $apks) {
+        & $apksigner verify $a.FullName *> $null
+        if ($LASTEXITCODE -ne 0) { $unsigned += $a.Name }
+    }
+    if ($unsigned.Count -gt 0) {
+        Write-Bad ('以下 APK 未签名，装上会报 packageinfo is null：' + ($unsigned -join '、'))
+        Write-Info '检查 src-tauri/gen/android/keystore.properties 是否存在、密码是否正确'
+        exit 1
+    }
+    Write-Ok ('签名校验通过（' + $apks.Count + ' 个 APK）')
+} else {
+    Write-Info '未找到 apksigner，跳过签名校验'
+}
+
 Write-Ok ('出包成功，共 ' + $apks.Count + ' 个 APK')
 Write-Host ''
 foreach ($a in ($apks | Sort-Object Length)) {
