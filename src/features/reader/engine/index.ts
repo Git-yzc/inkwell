@@ -21,10 +21,10 @@ import 'foliate-js/view.js';
 import type { FoliateLocation, FoliateTocItem, View } from 'foliate-js/view.js';
 
 import {
-  THEMES,
   type BookInfo,
   type ReaderLocation,
   type RendererSettings,
+  THEMES,
   type TocItem,
 } from './types';
 
@@ -36,6 +36,11 @@ export interface OpenOptions {
 
 type RelocateListener = (loc: ReaderLocation) => void;
 type LoadListener = (e: { index: number }) => void;
+
+/** 滚轮累积多少像素才翻一页。 */
+const WHEEL_STEP = 50;
+/** 翻页后的冷却时间（毫秒）：一次快速拨动会连发几十个 wheel 事件，没有冷却会一蹦好几页。 */
+const WHEEL_COOLDOWN_MS = 250;
 
 /**
  * 取到书籍文件。
@@ -150,6 +155,10 @@ export class ReaderEngine {
   #relocateListeners = new Set<RelocateListener>();
   #loadListeners = new Set<LoadListener>();
   #opened = false;
+  /** 已挂上滚轮监听的书籍文档；换章节会换文档，用它去重 */
+  #wheelDoc: Document | null = null;
+  #wheelAccum = 0;
+  #wheelUnlockAt = 0;
 
   constructor(host: HTMLElement, settings: RendererSettings) {
     this.#settings = settings;
@@ -167,9 +176,10 @@ export class ReaderEngine {
     });
 
     this.#view.addEventListener('load', (e) => {
-      const detail = (e as CustomEvent<{ index: number }>).detail;
-      // 换章节时内核会重建文档，样式需要重新注入
+      const detail = (e as CustomEvent<{ doc?: Document; index: number }>).detail;
+      // 换章节时内核会重建 iframe 文档，样式和滚轮监听都要重新挂
       this.#applyRendererAttributes();
+      this.#bindWheel(detail?.doc);
       for (const fn of this.#loadListeners) fn({ index: detail?.index ?? 0 });
     });
   }
@@ -199,6 +209,10 @@ export class ReaderEngine {
   }
 
   close(): void {
+    this.#wheelDoc?.removeEventListener('wheel', this.#onWheel);
+    this.#wheelDoc = null;
+    this.#wheelAccum = 0;
+    this.#wheelUnlockAt = 0;
     try {
       this.#view.close();
     } catch {
@@ -261,6 +275,49 @@ export class ReaderEngine {
       renderer.setStyles?.(buildCss(s));
     }
   }
+
+  /* ------------------------------------------------------------ 滚轮翻页 */
+
+  /**
+   * 给书籍文档挂滚轮监听，让「翻页」模式也能用滚轮翻页。
+   *
+   * 内核的 paginator 完全没有 wheel 处理：paginated 模式下容器是
+   * `overflow: hidden`，滚轮事件没人接管就直接丢了。
+   *
+   * 两个关键点：
+   * 1. 滚轮事件产生在书籍所在的 iframe **内部**，不会冒泡到外层文档，
+   *    所以只能挂在 load 事件交出来的 doc 上（内核自己挂 touchstart 也是这么做的）。
+   * 2. 换章节时内核会重建 iframe 文档并再次触发 load，用 #wheelDoc 去重，
+   *    避免同一文档重复绑定。切换 flow 模式不会重建文档（内核只重排），
+   *    所以这里挂一次就够，模式判断放在事件回调里做。
+   */
+  #bindWheel(doc: Document | undefined): void {
+    if (!doc || this.#wheelDoc === doc) return;
+    this.#wheelDoc = doc;
+    doc.addEventListener('wheel', this.#onWheel, { passive: false });
+  }
+
+  #onWheel = (e: WheelEvent): void => {
+    // 滚动模式交给内核的原生滚动，不拦截
+    if (this.#settings?.flow !== 'paginated') return;
+
+    // 必须 preventDefault，否则列布局下画面会来回弹
+    e.preventDefault();
+
+    const now = Date.now();
+    if (now < this.#wheelUnlockAt) return;
+
+    // deltaMode 可能是像素(0)/行(1)/页(2)，先统一折算成像素再累加
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1;
+    this.#wheelAccum += e.deltaY * unit;
+
+    if (Math.abs(this.#wheelAccum) < WHEEL_STEP) return;
+
+    const forward = this.#wheelAccum > 0;
+    this.#wheelAccum = 0;
+    this.#wheelUnlockAt = now + WHEEL_COOLDOWN_MS;
+    void (forward ? this.next() : this.prev());
+  };
 
   /* ---------------------------------------------------------------- 事件 */
 
