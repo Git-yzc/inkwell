@@ -92,6 +92,7 @@
 | **改了界面，重新出包装上去还是旧界面** | cargo **不跟踪 `dist/`**——`tauri-build` 只为 sidecar / resources / 配置文件声明 `rerun-if-changed`，所以前端变了不会重编 crate，旧资源继续内嵌 | `src-tauri/build.rs` 里的 `cargo:rerun-if-changed=../dist` **别删** |
 | **Android 导入书报「文件不存在」，文件名还是一串 `%E5%BE%90...`** | Android 选择器走 SAF，交回来的是 `content://` URI（`tauri-plugin-dialog` 的 `DialogPlugin.kt:117` 直接给 `uri.toString()`），**不是文件路径**；`std::fs` 打不开它 | `import_books` 现在会先把 URI 落地成临时文件（走 `tauri-plugin-fs` 的 `Fs::open`，Android 上即原生 `ContentResolver`）。写导入/读取相关代码时，别默认「拿到的一定是路径」 |
 | **Android 界面顶到状态栏；双指一捏整页缩到左上角** | Tauri 模板调了 `enableEdgeToEdge()`，但那只是「允许」edge-to-edge，**insets 得自己消费**；Android 15 起（targetSdk 35+）更是强制。WebView 的 pinch-zoom 也默认开着 | insets 在 `MainActivity.kt` 里挂 `android.R.id.content` 处理。⚠️ **CSS 的 `env(safe-area-inset-*)` 在 Android WebView 上只按「屏幕挖孔」上报**，不含状态栏高度，靠它顶不住 |
+| **Android 上「划词后弹出来的东西」被系统菜单盖住** | 选中文字后 Android 会先弹**系统自己的**「复制 / 粘贴 / 网络搜索」浮层。那是**原生浮层**，永远贴着选区、且画在 WebView **之上** —— 不是 z-index 能解决的，浮在选区附近的任何 UI 都会被盖住 | 划词相关的 UI（批注操作栏，将来还有释义卡片）**一律贴屏幕底部**，别浮在选区旁边 |
 
 ---
 
@@ -171,15 +172,18 @@ myEpubReader/                     # 仓库目录（应用名是 Inkwell，二者
 | --- | --- |
 | 阶段 0：环境与骨架 | ✅ 完成（双端出包跑通） |
 | 阶段 1：MVP 阅读器 | ✅ 完成，**用户已验收通过** |
-| 阶段 2：中文化 + 批注 + 搜索 | 🔄 进行中：中文排版 ✅、Android 真机适配 ✅（导入/安全区/缩放）；中文字体 / 简繁转换 / 批注 / 全文搜索待做 |
+| 阶段 2：中文化 + 批注 + 搜索 | 🔄 进行中：中文排版 ✅、批注 ✅（高亮/笔记/书签/导出）、Android 真机适配 ✅；中文字体 / 简繁转换 / 全文搜索待做 |
 | 阶段 3 及以后 | ⏸️ 未开始 |
 
 **阶段 1 已交付的能力**：书库（导入/封面/搜索/排序/删除）、阅读器
 （目录跳转、翻页与滚动、滚轮与点按与方向键翻页、CFI 精确进度）、阅读设置
 （字号/行距/边距/字体/主题/分栏）。
 
-**阶段 2 已交付**：中文排版 —— 首行缩进 2 字、行首禁则、中西文自动间距与标点挤压，
-自动 / 开 / 关三档（详见 `docs/BACKLOG.md` §3.1）。
+**阶段 2 已交付**：
+
+- **中文排版** —— 首行缩进 2 字、行首禁则、中西文自动间距与标点挤压，自动 / 开 / 关三档（§3.1）
+- **批注** —— 划词高亮（四色）、笔记、书签、侧栏列表与跳转、导出 Markdown / JSON；
+  书签还支持「下拉手势」（翻页模式下下拉过 96px 松手即切换）（§3.4）
 
 **已修复**：
 
