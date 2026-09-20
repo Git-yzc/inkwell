@@ -2,5 +2,11 @@
     <!-- Base application theme. -->
     <style name="Theme.inkwell" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <!-- Customize your theme here. -->
+        <!--
+            edge-to-edge 下系统栏区域画的是窗口底色。应用界面本身是深色
+            （neutral-950 ≈ #0A0A0A），这里设成同一个颜色：
+            一是让状态栏/导航栏区域不出现突兀的白边，二是避免启动瞬间白闪。
+        -->
+        <item name="android:windowBackground">#FF0A0A0A</item>
     </style>
 </resources>

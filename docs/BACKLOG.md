@@ -3,7 +3,7 @@
 > 本文档记录**尚未完成**的工作与**已知问题**，供后续按需取用。
 > 当前进度快照见下方「一、当前状态」；环境与流程约定见 [AGENTS.md](../AGENTS.md)。
 >
-> 最后更新：2026-09-20（修复 Android 启动连 localhost:1420；完成阶段 2.1 中文排版）
+> 最后更新：2026-09-20（修复 Android 真机反馈的导入失败 + 状态栏重叠/缩放）
 
 ---
 
@@ -115,7 +115,7 @@ Failed to request http://localhost:1420/: error sending request for url (http://
 | 产物 | 内含 `index-*.js` | 结论 |
 | --- | --- | --- |
 | 修复前（0.1.0 首次发布的那份 arm64 包） | **无** | 开发模式产物，启动即连 localhost:1420 |
-| 修复后 `apk/arm64/release/app-arm64-release.apk` | `index-zQoNuFaf.js` | 前端资源已内嵌 |
+| 修复后 `apk/arm64/release/app-arm64-release.apk` | 有（形如 `index-*.js`） | 前端资源已内嵌 |
 
 > ⚠️ **判据只能是 `index-*.js`，不能拿 `localhost:1420` 当判据**。
 > devUrl 是配置数据，修复前后都会被编进二进制，用它会得出完全相反的结论。
@@ -171,8 +171,37 @@ Failed to request http://localhost:1420/: error sending request for url (http://
 `percent_decode_handles_utf8_and_bad_escapes`、`sniffs_format_from_magic_bytes`，
 其中那条 URI 的形状就是照真机报错复原的。
 
----
+### 2.5 ✅ 已修复：Android 界面顶到状态栏；双指缩放把整页缩到左上角
 
+**现象**（同一台机器）：
+
+1. 书库的标题与搜索框直接压在最顶上，与状态栏重叠；
+2. 双指一捏，整页缩到屏幕左上角、四周留一大片空白（用户截图就是这个样子）。
+
+**根因（两个独立问题）**：
+
+1. **状态栏重叠**：Tauri 模板在 `MainActivity.onCreate` 里调了 `enableEdgeToEdge()`，
+   但**没有任何地方消费 insets**。`enableEdgeToEdge()` 只是「允许」edge-to-edge，
+   系统栏盖在内容上这件事得自己让位；Android 15 起（targetSdk 35+）更是强制 edge-to-edge。
+   > ⚠️ **别指望 CSS 的 `env(safe-area-inset-*)`**：Android WebView 只按「屏幕挖孔」上报，
+   > 不会把状态栏高度算进去，靠它顶不住。
+2. **缩放**：WebView 自带的 pinch-zoom 没关。App 外壳不需要它 —— 正文大小由阅读设置里的
+   字号控制，捏合缩放还会打乱 foliate 的分页。
+
+**修复**（`src-tauri/gen/android/app/src/main/java/com/inkwell/reader/MainActivity.kt`）：
+
+- 把 `ViewCompat.setOnApplyWindowInsetsListener` 挂在 `android.R.id.content` 上，
+  按 `systemBars() or displayCutout()` 的实际高度给根布局补 padding；
+- `onWebViewCreate` 里关掉 `setSupportZoom` / `builtInZoomControls` / `displayZoomControls`；
+- 状态栏图标改浅色（`SystemBarStyle.dark`），并把 `windowBackground` 设成 `#FF0A0A0A` ——
+  edge-to-edge 下系统栏区域画的是窗口底色，不设会露出一条白边。
+
+**验收**：用 `apkanalyzer dex code` 反汇编 APK 里的 `MainActivity`，确认改动确实进包了 ——
+`findViewById(0x1020002)`（即 `android.R.id.content`）+ `ViewCompat.setOnApplyWindowInsetsListener`，
+以及 `setSupportZoom(false)` / `setBuiltInZoomControls(false)` / `setDisplayZoomControls(false)` 都在。
+真机观感待复验。
+
+---
 ## 三、阶段 2：中文排版 + 批注 + 全文搜索
 
 ### 3.1 ✅ 已完成：中文排版（2026-09-20）
@@ -297,11 +326,13 @@ WebDAV 或局域网 HTTP，同步阅读进度（CFI）、批注、设置。
 ## 八、接手时的建议顺序
 
 1. ~~修滚轮~~ ✅（§2.1）
-2. ~~修 Android 启动连 devUrl~~ ✅（§2.2）——**待你在真机验收**
+2. ~~修 Android 启动连 devUrl~~ ✅（§2.2）
 3. ~~中文排版~~ ✅（§3.1）
-4. **下一步建议**：阶段 2 剩下的 —— 中文字体管理（§3.2）、简繁转换（§3.3）、
+4. ~~Android 真机反馈：导入失败、状态栏重叠、缩放~~ ✅（§2.4 / §2.5）
+   —— 上面 2 / 4 三项都**待你在真机上验收**
+5. **下一步建议**：阶段 2 剩下的 —— 中文字体管理（§3.2）、简繁转换（§3.3）、
    批注（§3.4，`annotations` 表已建好）、全文搜索（§3.5）
-5. 然后按阶段 3 → 4 推进，每完成一块就出包给用户验收
+6. 然后按阶段 3 → 4 推进，每完成一块就出包给用户验收
 
 > 每次改动界面后，**务必用 AGENTS.md §5.4 的 CDP 方法驱动真实应用验证一遍**。
 > 阶段 1 有三个「构建全绿、功能全废」的 bug 就是这样抓出来的；

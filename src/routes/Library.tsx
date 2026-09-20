@@ -124,7 +124,7 @@ export default function Library() {
         {!loading && total === 0 && (
           <div className="mt-24 text-center">
             <p className="font-serif text-2xl text-neutral-600">书库是空的</p>
-            <p className="mt-2 text-sm text-neutral-600">点右上角「导入书籍」，选几本 EPUB 试试</p>
+            <p className="mt-2 text-sm text-neutral-600">点「导入书籍」，选几本 EPUB 试试</p>
           </div>
         )}
 

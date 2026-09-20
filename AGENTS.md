@@ -90,6 +90,8 @@
 | **Android 装不上，报 `packageinfo is null`** | 打出来的 APK **没有签名**（文件名带 `-unsigned`）。未签名在 Android 上是硬失败，不是「只提示未知来源」 | 配好 `src-tauri/gen/android/keystore.properties`；`build-android.ps1` 已加 `apksigner verify` 校验，未签名直接失败 |
 | **Android 发布包一启动就报 `Failed to request http://localhost:1420/`** | 我们的 Android shim 只调 `cargo build --release`，没带官方 CLI 会加的 `custom-protocol` 特性 → tauri 的 `build.rs` 把 `dev` 置为 true → **不内嵌前端资源**，改去连 devUrl | `Cargo.toml` 的 `[features] custom-protocol` 与 `tauri.js` release 分支的 `--features custom-protocol` **两处都得留着**；`build-android.ps1` 已加硬性校验（从 APK 里解 `.so` 搜 `index-*.js`）。⚠️ 判据只能是 `index-*.js`，`localhost:1420` 字符串修复前后都在二进制里，拿它当判据会得出反结论 |
 | **改了界面，重新出包装上去还是旧界面** | cargo **不跟踪 `dist/`**——`tauri-build` 只为 sidecar / resources / 配置文件声明 `rerun-if-changed`，所以前端变了不会重编 crate，旧资源继续内嵌 | `src-tauri/build.rs` 里的 `cargo:rerun-if-changed=../dist` **别删** |
+| **Android 导入书报「文件不存在」，文件名还是一串 `%E5%BE%90...`** | Android 选择器走 SAF，交回来的是 `content://` URI（`tauri-plugin-dialog` 的 `DialogPlugin.kt:117` 直接给 `uri.toString()`），**不是文件路径**；`std::fs` 打不开它 | `import_books` 现在会先把 URI 落地成临时文件（走 `tauri-plugin-fs` 的 `Fs::open`，Android 上即原生 `ContentResolver`）。写导入/读取相关代码时，别默认「拿到的一定是路径」 |
+| **Android 界面顶到状态栏；双指一捏整页缩到左上角** | Tauri 模板调了 `enableEdgeToEdge()`，但那只是「允许」edge-to-edge，**insets 得自己消费**；Android 15 起（targetSdk 35+）更是强制。WebView 的 pinch-zoom 也默认开着 | insets 在 `MainActivity.kt` 里挂 `android.R.id.content` 处理。⚠️ **CSS 的 `env(safe-area-inset-*)` 在 Android WebView 上只按「屏幕挖孔」上报**，不含状态栏高度，靠它顶不住 |
 
 ---
 
@@ -169,7 +171,7 @@ myEpubReader/                     # 仓库目录（应用名是 Inkwell，二者
 | --- | --- |
 | 阶段 0：环境与骨架 | ✅ 完成（双端出包跑通） |
 | 阶段 1：MVP 阅读器 | ✅ 完成，**用户已验收通过** |
-| 阶段 2：中文化 + 批注 + 搜索 | 🔄 进行中：中文排版 ✅；中文字体 / 简繁转换 / 批注 / 全文搜索待做 |
+| 阶段 2：中文化 + 批注 + 搜索 | 🔄 进行中：中文排版 ✅、Android 真机适配 ✅（导入/安全区/缩放）；中文字体 / 简繁转换 / 批注 / 全文搜索待做 |
 | 阶段 3 及以后 | ⏸️ 未开始 |
 
 **阶段 1 已交付的能力**：书库（导入/封面/搜索/排序/删除）、阅读器
@@ -183,6 +185,8 @@ myEpubReader/                     # 仓库目录（应用名是 Inkwell，二者
 
 - 翻页模式下的鼠标滚轮翻页（`docs/BACKLOG.md` §2.1）
 - Android 发布包一启动就报 `Failed to request http://localhost:1420/`（`docs/BACKLOG.md` §2.2）
+- Android 导入书报「文件不存在」（SAF 的 `content://` URI，§2.4）
+- Android 界面顶到状态栏、双指缩放把整页缩小（§2.5）
 
 **实测产物**（`personal/out/` 下有副本）：
 
