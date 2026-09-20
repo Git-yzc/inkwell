@@ -15,6 +15,19 @@ use std::path::Path;
 /// 封面缩略图最长边的像素上限。书库网格里 480px 足够清晰，又能显著缩小体积。
 const COVER_MAX_EDGE: u32 = 480;
 
+/// 支持导入的扩展名（小写，不含点）。
+///
+/// 新增格式时只改这里：导入的合法性判断与错误提示都从它派生。
+pub const SUPPORTED_FORMATS: [&str; 9] = [
+    "epub", "mobi", "azw3", "azw", "fb2", "cbz", "pdf", "txt", "md",
+];
+
+/// 文件路径对应的格式；不支持的扩展名返回 None。
+pub fn format_of(path: &Path) -> Option<&'static str> {
+    let ext = path.extension()?.to_string_lossy().to_lowercase();
+    SUPPORTED_FORMATS.iter().copied().find(|f| *f == ext)
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Book {
@@ -126,25 +139,17 @@ pub fn import_one(
     covers_dir: &Path,
     src: &Path,
 ) -> Result<Option<Book>> {
-    let ext = src
-        .extension()
-        .map(|e| e.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
-
-    let format = match ext.as_str() {
-        "epub" => "epub",
-        "mobi" => "mobi",
-        "azw3" => "azw3",
-        "azw" => "azw",
-        "fb2" => "fb2",
-        "cbz" => "cbz",
-        "pdf" => "pdf",
-        "txt" => "txt",
-        "md" => "md",
-        other => {
+    let format = match format_of(src) {
+        Some(f) => f,
+        None => {
+            let what = match src.extension() {
+                Some(e) => format!(".{}", e.to_string_lossy().to_lowercase()),
+                None => "（没有扩展名）".to_string(),
+            };
             return Err(Error::Other(format!(
-                "暂不支持的文件格式 .{other}（目前支持 epub/mobi/azw3/fb2/cbz/pdf/txt/md）"
-            )))
+                "暂不支持的文件格式{what}（目前支持 {}）",
+                SUPPORTED_FORMATS.join("/")
+            )));
         }
     };
 

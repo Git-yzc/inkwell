@@ -139,6 +139,40 @@ Failed to request http://localhost:1420/: error sending request for url (http://
 
 ---
 
+### 2.4 ✅ 已修复：Android 导入 EPUB 报「文件不存在」
+
+**现象**（用户在 Redmi K90 上实测）：本地确实有那个 epub，选中后导入失败，提示：
+
+```
+失败 1 本: %E5%BE%90%E6%98%8E%E8%8B%B1...%20illegal.epub: 文件不存在
+```
+
+**根因**：Android 的文件选择器走 SAF，交回来的是 **`content://` URI**，不是文件路径
+（`tauri-plugin-dialog` 的 `DialogPlugin.kt:117` 直接把 `uri.toString()` 递给前端）。
+而 `import_books` 拿它当路径用：`Path::new("content://...").exists()` → false → 「文件不存在」。
+提示里那串 `%E5%BE%90...` 就是被百分号编码的文件名 —— 正好坐实了来源是 URI。
+
+> 这条在阶段 0 的风险清单里就写过（`IMPLEMENTATION_PLAN.md` §六-2），当时没做最小验证，
+> 于是拖到真机上才暴露。
+
+**修复**（`src-tauri/src/lib.rs`）：导入前先把来源「落地」成本地文件。
+
+- 用 `tauri-plugin-fs` 的 `Fs::open()` —— 它在 Android 上会走原生 `ContentResolver` 拿 fd，
+  再用 `std::io::copy` 写到数据目录的临时文件。之后整条链路（算指纹、解析元数据、
+  拷进书库）照旧按本地路径走，一行都不用改。
+- 文件名从 URI 末段还原（含百分号解码）：`primary%3ADownload%2F书.epub` → `书.epub`。
+- 有些 provider 的末段只是文档 id（`msf%3A1000000043`），看不出扩展名。这时从**文件头**
+  猜格式（`%PDF` / `BOOKMOBI` / `PK`；zip 容器用现成的 EPUB 解析器区分 EPUB 与 CBZ），
+  否则会在格式判断那一步被拒。
+- 临时目录用完即删，每批导入前先清一次残留。
+
+**验收**：真机导入待复验。可离线验证的部分已固化成单测 ——
+`extracts_file_name_from_saf_uri`、`tolerates_document_id_uri`、
+`percent_decode_handles_utf8_and_bad_escapes`、`sniffs_format_from_magic_bytes`，
+其中那条 URI 的形状就是照真机报错复原的。
+
+---
+
 ## 三、阶段 2：中文排版 + 批注 + 全文搜索
 
 ### 3.1 ✅ 已完成：中文排版（2026-09-20）
