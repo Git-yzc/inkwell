@@ -133,6 +133,7 @@ myEpubReader/                     # 仓库目录（应用名是 Inkwell，二者
 │   │   ├── download.mjs          # 通用下载器（绕开 schannel 故障）
 │   │   ├── build-win.ps1         # Windows 一键出包
 │   │   ├── build-android.ps1     # Android 一键出包
+│   │   ├── cdp.mjs               # 用 CDP 驱动真实应用做验证（见 §5.4）
 │   │   └── tauri.mjs             # ★ Tauri CLI 包装器，必须经它调用
 │   └── notes/                    # 环境备忘、安装日志
 ├── packages/foliate-js/          # 【阶段 1 引入】submodule，固定 commit
@@ -258,10 +259,24 @@ Invoke-WebRequest http://127.0.0.1:9222/json -UseBasicParsing
 
 再用 Node（22 起自带 `WebSocket`）连上 `webSocketDebuggerUrl`，
 发 `Runtime.evaluate` 就能读 DOM、点按钮、取应用内部状态。
+**这一步已经有现成脚本，不用每次现写**：
+
+```powershell
+node personal/scripts/cdp.mjs "document.title"
+node personal/scripts/cdp.mjs "location.hash = '#/read/<bookId>'; 'ok'"
+node personal/scripts/cdp.mjs "document.querySelector('footer input[type=range]').value"
+```
 
 > ⚠️ foliate-js 的 View 与 Paginator 都用 `attachShadow({mode:'closed'})`，
-> **影子树读不到**。但 `book` / `lastLocation` / `renderer`
-> 是公开属性，据此足以判断书籍是否真的加载成功。
+> **影子树读不到**。但 `book` / `lastLocation` / `renderer` 是公开属性，
+> 且 `renderer.getContents()` 能拿到书籍文档，据此足以判断书籍是否真的
+> 加载成功、排版是否真的生效：
+>
+> ```js
+> const v = document.querySelector('foliate-view');
+> const doc = v.renderer.getContents()[0].doc;
+> doc.defaultView.getComputedStyle(doc.querySelector('p')).textIndent;
+> ```
 > 
 > ⚠️ 子进程会随 pwsh 会话结束被回收，必须用后台作业让应用常驻，否则 CDP 连不上。
 
