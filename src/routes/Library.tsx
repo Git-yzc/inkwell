@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import BookCard from '@/components/BookCard';
-import type { Book } from '@/lib/api';
+import { api, type Book } from '@/lib/api';
 import { type SortKey, selectVisibleBooks, useLibrary } from '@/store/library';
 
 /** 与 backend library.rs 支持的格式保持一致。 */
@@ -32,6 +32,14 @@ export default function Library() {
 
   const [notice, setNotice] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Book | null>(null);
+  /**
+   * 版本号。
+   *
+   * 显示出来是有实际用途的：这个 App 只在手机上装、迭代又频繁，
+   * 而安装包文件名以前一直不变，光看界面分不清装的是哪一版
+   * （真发生过：以为装上了新版，其实还是旧包）。
+   */
+  const [version, setVersion] = useState<string | null>(null);
 
   // 派生列表必须用 useMemo：selectVisibleBooks 每次返回新数组，
   // 直接交给 zustand 选择器会导致无限重渲染。
@@ -43,6 +51,15 @@ export default function Library() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    void api
+      .appInfo()
+      .then((info) => setVersion(info.version))
+      .catch(() => {
+        // 拿不到版本号不影响用，不显示就是了
+      });
+  }, []);
 
   async function handleImport() {
     setNotice(null);
@@ -77,7 +94,14 @@ export default function Library() {
     <div className="min-h-screen bg-neutral-950 text-neutral-100">
       <header className="sticky top-0 z-10 border-b border-neutral-800/80 bg-neutral-950/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3 px-5 py-3">
-          <h1 className="font-serif text-xl tracking-[0.2em] text-amber-100/90">砚池</h1>
+          <h1 className="font-serif text-xl tracking-[0.2em] text-amber-100/90">
+            砚池
+            {version !== null && (
+              <span className="ml-1.5 align-middle font-sans text-[10px] tracking-normal text-neutral-600">
+                v{version}
+              </span>
+            )}
+          </h1>
 
           <input
             value={query}

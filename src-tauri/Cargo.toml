@@ -1,6 +1,6 @@
 [package]
 name = "inkwell"
-version = "0.1.0"
+version = "0.1.1"
 description = "砚池 (Inkwell) —— 个人自用的跨平台电子书阅读器"
 authors = ["Git-yzc"]
 license = "MIT"
