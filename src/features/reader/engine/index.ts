@@ -42,6 +42,15 @@ type RelocateListener = (loc: ReaderLocation) => void;
 type LoadListener = (e: { index: number }) => void;
 type SelectionListener = (sel: SelectionInfo | null) => void;
 type AnnotationClickListener = (cfi: string) => void;
+/**
+ * 下拉进度。
+ * - `true`：已过触发线，松手就生效
+ * - `false`：正在下拉，还没到线
+ * - `null`：没有进行中的手势
+ */
+type PullProgressListener = (armed: boolean | null) => void;
+/** 下拉到触发线后松手。 */
+type PullTriggerListener = () => void;
 
 /** foliate 画批注时交回来的东西（见 view.js 的 addAnnotation）。 */
 interface DrawAnnotationDetail {
@@ -51,6 +60,13 @@ interface DrawAnnotationDetail {
 
 /** 选区防抖：拖拽时 selectionchange 会连发，等手停一下再弹浮层。 */
 const SELECTION_DEBOUNCE_MS = 150;
+
+/** 下拉多少像素开始给提示（还没到触发线）。 */
+const PULL_HINT_PX = 36;
+/** 下拉多少像素算「要加书签」——松手即触发。 */
+const PULL_TRIGGER_PX = 96;
+/** 竖直位移至少是水平位移的多少倍才算「下拉」而不是横向滑动。 */
+const PULL_VERTICAL_RATIO = 1.6;
 
 /** 滚轮累积多少像素才翻一页。 */
 const WHEEL_STEP = 50;
@@ -211,6 +227,13 @@ export class ReaderEngine {
   #loadListeners = new Set<LoadListener>();
   #selectionListeners = new Set<SelectionListener>();
   #annotationClickListeners = new Set<AnnotationClickListener>();
+  #pullProgressListeners = new Set<PullProgressListener>();
+  #pullTriggerListeners = new Set<PullTriggerListener>();
+  #pullDoc: Document | null = null;
+  #pullStart: { x: number; y: number } | null = null;
+  #pullPhase: 'idle' | 'pulling' | 'armed' = 'idle';
+  /** 一次手势只触发一次，松手才复位 */
+  #pullFired = false;
   #opened = false;
   /** 已挂上滚轮监听的书籍文档；换章节会换文档，用它去重 */
   #wheelDoc: Document | null = null;
@@ -245,6 +268,7 @@ export class ReaderEngine {
       this.#applyRendererAttributes();
       this.#bindWheel(detail?.doc);
       this.#bindSelection(detail?.doc);
+      this.#bindPullDown(detail?.doc);
       this.#sectionIndex = detail?.index ?? 0;
       for (const fn of this.#loadListeners) fn({ index: detail?.index ?? 0 });
     });
@@ -316,6 +340,7 @@ export class ReaderEngine {
     this.#selectionDoc?.removeEventListener('selectionchange', this.#onSelectionChange);
     this.#selectionDoc = null;
     window.clearTimeout(this.#selectionTimer);
+    this.#unbindPullDown();
     try {
       this.#view.close();
     } catch {
@@ -326,6 +351,8 @@ export class ReaderEngine {
     this.#loadListeners.clear();
     this.#selectionListeners.clear();
     this.#annotationClickListeners.clear();
+    this.#pullProgressListeners.clear();
+    this.#pullTriggerListeners.clear();
     this.#highlights.clear();
   }
 
@@ -490,6 +517,109 @@ export class ReaderEngine {
     if (s.cjkTypography === 'off') return false;
     return isCjkLanguage(pickText(this.#view.book?.metadata?.language));
   }
+
+  /* ------------------------------------------------------------ 下拉手势 */
+
+  /** 下拉进度（用于显示提示）。 */
+  onPullProgress(fn: PullProgressListener): () => void {
+    this.#pullProgressListeners.add(fn);
+    return () => this.#pullProgressListeners.delete(fn);
+  }
+
+  /** 下拉过线并松手。 */
+  onPullTrigger(fn: PullTriggerListener): () => void {
+    this.#pullTriggerListeners.add(fn);
+    return () => this.#pullTriggerListeners.delete(fn);
+  }
+
+  /**
+   * 监听正文里的「下拉」手势（向下滑）。
+   *
+   * **只在翻页模式下启用**：
+   * - 翻页模式下正文没有竖直滚动，向下拖本来就是空操作。而且内核的 `snap()`
+   *   在横排下只看 `vx`（见 paginator.js:805），所以纯竖直拖动不会误翻页 ——
+   *   这条是读源码确认的，不是猜的。
+   * - 滚动模式下向下拖就是正常的向上滚页，抢过来会很别扭，所以不启用。
+   *
+   * 另外，正在选词时不触发：那时候用户拖的是选择手柄，不是下拉。
+   */
+  #bindPullDown(doc: Document | undefined): void {
+    if (!doc || this.#pullDoc === doc) return;
+    this.#unbindPullDown();
+    this.#pullDoc = doc;
+    // 只读不拦截，所以 passive 即可（也省得拖慢滚动）
+    doc.addEventListener('touchstart', this.#onPullStart, { passive: true });
+    doc.addEventListener('touchmove', this.#onPullMove, { passive: true });
+    doc.addEventListener('touchend', this.#onPullEnd, { passive: true });
+    doc.addEventListener('touchcancel', this.#onPullEnd, { passive: true });
+  }
+
+  #unbindPullDown(): void {
+    const doc = this.#pullDoc;
+    if (doc) {
+      doc.removeEventListener('touchstart', this.#onPullStart);
+      doc.removeEventListener('touchmove', this.#onPullMove);
+      doc.removeEventListener('touchend', this.#onPullEnd);
+      doc.removeEventListener('touchcancel', this.#onPullEnd);
+    }
+    this.#pullDoc = null;
+    this.#resetPull();
+  }
+
+  /** 收起提示并把状态归零。 */
+  #resetPull(): void {
+    this.#pullStart = null;
+    this.#pullFired = false;
+    this.#setPullPhase('idle');
+  }
+
+  #setPullPhase(phase: 'idle' | 'pulling' | 'armed'): void {
+    if (phase === this.#pullPhase) return;
+    this.#pullPhase = phase;
+    const value = phase === 'idle' ? null : phase === 'armed';
+    for (const fn of this.#pullProgressListeners) fn(value);
+  }
+
+  #onPullStart = (e: TouchEvent): void => {
+    if (this.#settings?.flow !== 'paginated' || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    if (!t) return;
+    this.#pullStart = { x: t.clientX, y: t.clientY };
+    this.#pullFired = false;
+  };
+
+  #onPullMove = (e: TouchEvent): void => {
+    const start = this.#pullStart;
+    if (!start || this.#pullFired || this.#settings?.flow !== 'paginated') return;
+
+    const t = e.touches[0];
+    if (!t) return;
+
+    // 正在选词：用户拖的是选择手柄，不是下拉
+    if (this.#selectionDoc?.defaultView?.getSelection()?.isCollapsed === false) {
+      this.#setPullPhase('idle');
+      return;
+    }
+
+    const dy = t.clientY - start.y;
+    const dx = Math.abs(t.clientX - start.x);
+
+    // 往上拖、或横向为主的滑动，都不算这个手势
+    if (dy < PULL_HINT_PX || dy < dx * PULL_VERTICAL_RATIO) {
+      this.#setPullPhase('idle');
+      return;
+    }
+
+    this.#setPullPhase(dy >= PULL_TRIGGER_PX ? 'armed' : 'pulling');
+  };
+
+  #onPullEnd = (): void => {
+    const fire = this.#pullPhase === 'armed' && !this.#pullFired;
+    this.#pullStart = null;
+    this.#pullFired = true;
+    this.#setPullPhase('idle');
+    if (fire) for (const fn of this.#pullTriggerListeners) fn();
+  };
 
   /* ------------------------------------------------------------ 滚轮翻页 */
 

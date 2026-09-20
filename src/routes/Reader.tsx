@@ -68,8 +68,10 @@ export default function Reader() {
   const [editor, setEditor] = useState<EditorTarget | null>(null);
   const [annotationBusy, setAnnotationBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
-  /** 正文容器的尺寸与位置，用来把选区坐标换算成容器内坐标 */
-  const [hostBox, setHostBox] = useState({ left: 0, top: 0, width: 0 });
+  /** 下拉手势进度：true 已过触发线 / false 还在拉 / null 没在拉 */
+  const [pull, setPull] = useState<boolean | null>(null);
+  /** 一次性操作反馈（加 / 去书签） */
+  const [toast, setToast] = useState<string | null>(null);
 
   const theme = THEMES[settings.theme];
 
@@ -88,6 +90,9 @@ export default function Reader() {
    */
   const annotationsRef = useRef<Annotation[]>([]);
   annotationsRef.current = annotations;
+
+  /** 下拉手势触发时调用的「最新版 toggleBookmark」，赋值见下面 */
+  const toggleBookmarkRef = useRef<() => Promise<void>>(async () => {});
 
   const lastLocRef = useRef<{ cfi: string | null; chapter: string | null }>({
     cfi: null,
@@ -173,6 +178,12 @@ export default function Reader() {
       if (hit) setEditor({ mode: 'edit', annotation: hit });
     });
 
+    // 下拉手势：过线后松手就切换当前页的书签
+    const offPullProgress = engine.onPullProgress(setPull);
+    const offPullTrigger = engine.onPullTrigger(() => {
+      void toggleBookmarkRef.current();
+    });
+
     (async () => {
       try {
         const bookInfo = await engine.open(book.absPath, { lastLocation: book.progressCfi });
@@ -193,6 +204,8 @@ export default function Reader() {
       offRelocate();
       offSelection();
       offAnnotationClick();
+      offPullProgress();
+      offPullTrigger();
       engine.close();
       engineRef.current = null;
     };
@@ -224,24 +237,12 @@ export default function Reader() {
     engineRef.current?.setHighlights(highlights);
   }, [annotations]);
 
-  // ---- 量一下正文容器的位置：选区的视口坐标要减掉它才能定位浮层 ----
+  // ---- 反馈提示显示 1.6 秒后自动消失 ----
   useEffect(() => {
-    const host = hostRef.current;
-    if (!host) return;
-    const measure = () => {
-      const r = host.getBoundingClientRect();
-      setHostBox({ left: r.left, top: r.top, width: r.width });
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(host);
-    window.addEventListener('resize', measure);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener('resize', measure);
-    };
-    // hostRef 挂的 div 一直存在，尺寸变化由 ResizeObserver 兜住，不需要别的依赖
-  }, []);
+    if (toast === null) return;
+    const timer = window.setTimeout(() => setToast(null), 1600);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
 
   // ---- 设置变化时实时套用（不重建引擎）----
   useEffect(() => {
@@ -406,9 +407,11 @@ export default function Reader() {
     const { cfi, chapter: ch } = lastLocRef.current;
     if (!cfi) return;
 
-    const existing = annotations.find((a) => a.type === 'bookmark' && a.cfi === cfi);
+    // 读 ref 而不是 state：下拉手势的回调只注册一次，闭包里的 annotations 会是旧值
+    const existing = annotationsRef.current.find((a) => a.type === 'bookmark' && a.cfi === cfi);
     if (existing) {
       await handleAnnotationDelete(existing);
+      setToast('已去掉书签');
       return;
     }
 
@@ -420,10 +423,19 @@ export default function Reader() {
         chapter: ch,
       });
       setAnnotations((list) => [created, ...list]);
+      setToast('已加书签 ★');
     } catch (e) {
       setError(`添加书签失败：${readableError(e)}`);
     }
   }
+
+  /**
+   * 给「下拉手势」用的最新函数引用。
+   *
+   * 手势回调在引擎里只注册一次，直接闭包 toggleBookmark 会永远用第一次渲染的那份，
+   * 而它依赖 book 与批注列表，必须每次拿最新的。
+   */
+  toggleBookmarkRef.current = toggleBookmark;
 
   function handleAnnotationJump(a: Annotation) {
     setShowAnnotations(false);
@@ -562,25 +574,20 @@ export default function Reader() {
           </div>
         )}
 
-        {/* 划词浮层 / 批注编辑。放在正文之上、点按区之下 */}
-        {editor !== null && (
-          <AnnotationEditor
-            target={editor}
-            theme={settings.theme}
-            containerWidth={hostBox.width}
-            containerRect={{ left: hostBox.left, top: hostBox.top }}
-            busy={annotationBusy}
-            onSave={(patch) => void handleEditorSave(patch)}
-            onDelete={
-              editor.mode === 'edit'
-                ? () => void handleAnnotationDelete(editor.annotation)
-                : undefined
-            }
-            onCancel={() => {
-              engineRef.current?.clearSelection();
-              setEditor(null);
-            }}
-          />
+        {/* 下拉加书签的实时提示 / 操作反馈 */}
+        {(pull !== null || toast !== null) && (
+          <div className="pointer-events-none absolute inset-x-0 top-3 z-30 flex justify-center">
+            <span
+              className="rounded-full border px-3 py-1 text-xs backdrop-blur"
+              style={{
+                borderColor: `${theme.muted}55`,
+                background: `${theme.bg}dd`,
+                color: theme.fg,
+              }}
+            >
+              {toast ?? (pull === true ? '松手加书签 ★' : '↓ 继续下拉加书签')}
+            </span>
+          </div>
         )}
 
         {/* 左右点按翻页。放在正文之上但避开面板区域 */}
@@ -601,6 +608,28 @@ export default function Reader() {
           </>
         )}
       </div>
+
+      {/* 批注操作栏。
+          刻意放在底部而不是浮在选区旁边 —— Android 选中文字会先弹系统自己的
+          「复制 / 粘贴 / 网络搜索」原生浮层，它永远贴着选区、且画在 WebView 之上，
+          浮在选区旁边的任何东西都会被它盖住（真机实测）。 */}
+      {editor !== null && (
+        <AnnotationEditor
+          target={editor}
+          theme={settings.theme}
+          busy={annotationBusy}
+          onSave={(patch) => void handleEditorSave(patch)}
+          onDelete={
+            editor.mode === 'edit'
+              ? () => void handleAnnotationDelete(editor.annotation)
+              : undefined
+          }
+          onCancel={() => {
+            engineRef.current?.clearSelection();
+            setEditor(null);
+          }}
+        />
+      )}
 
       {/* 底栏进度 */}
       <footer
