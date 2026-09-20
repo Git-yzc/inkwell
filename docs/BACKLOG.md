@@ -3,7 +3,7 @@
 > 本文档记录**尚未完成**的工作与**已知问题**，供后续按需取用。
 > 当前进度快照见下方「一、当前状态」；环境与流程约定见 [AGENTS.md](../AGENTS.md)。
 >
-> 最后更新：2026-09-20（修复 Android 真机反馈的导入失败 + 状态栏重叠/缩放）
+> 最后更新：2026-09-20（Android 真机验收通过：启动 / 导入 / 界面三处问题全部确认修复）
 
 ---
 
@@ -125,7 +125,7 @@ Failed to request http://localhost:1420/: error sending request for url (http://
 不会再悄悄放行开发模式产物。
 
 **验收标准**：APK 装上后直接打开书库，不需要任何本地服务在跑。
-（需你在真机上确认：本机没有安卓设备，只能验证到「资源确实内嵌」这一层。）
+✅ **真机已确认**（2026-09-20，Redmi K90）：装上直接进书库，不再报错。
 
 ---
 
@@ -133,7 +133,7 @@ Failed to request http://localhost:1420/: error sending request for url (http://
 
 | 项 | 说明 |
 | --- | --- |
-| Android 真机 | 0.1.0 签名包**能装**；启动报错已修（§2.2），**待你在真机上验收** |
+| Android 真机 | ✅ **已验收通过**（2026-09-20）：能装、能开、能导入、界面正常（§2.2 / §2.4 / §2.5） |
 | `pnpm tauri dev` 热更新 | 一直走的 release 构建，开发模式的热更新流程未实测 |
 | 大书库性能 | 目前书本数量很少。书多了之后封面网格需要虚拟滚动 |
 
@@ -166,7 +166,8 @@ Failed to request http://localhost:1420/: error sending request for url (http://
   否则会在格式判断那一步被拒。
 - 临时目录用完即删，每批导入前先清一次残留。
 
-**验收**：真机导入待复验。可离线验证的部分已固化成单测 ——
+**验收**：✅ **真机已确认**（2026-09-20）—— 之前失败的那本书现在能正常导入。
+可离线验证的部分另固化成单测 ——
 `extracts_file_name_from_saf_uri`、`tolerates_document_id_uri`、
 `percent_decode_handles_utf8_and_bad_escapes`、`sniffs_format_from_magic_bytes`，
 其中那条 URI 的形状就是照真机报错复原的。
@@ -199,7 +200,7 @@ Failed to request http://localhost:1420/: error sending request for url (http://
 **验收**：用 `apkanalyzer dex code` 反汇编 APK 里的 `MainActivity`，确认改动确实进包了 ——
 `findViewById(0x1020002)`（即 `android.R.id.content`）+ `ViewCompat.setOnApplyWindowInsetsListener`，
 以及 `setSupportZoom(false)` / `setBuiltInZoomControls(false)` / `setDisplayZoomControls(false)` 都在。
-真机观感待复验。
+✅ **真机已确认**（2026-09-20）：顶栏不再压状态栏，双指缩放也不再缩小整页。
 
 ---
 ## 三、阶段 2：中文排版 + 批注 + 全文搜索
@@ -329,7 +330,7 @@ WebDAV 或局域网 HTTP，同步阅读进度（CFI）、批注、设置。
 2. ~~修 Android 启动连 devUrl~~ ✅（§2.2）
 3. ~~中文排版~~ ✅（§3.1）
 4. ~~Android 真机反馈：导入失败、状态栏重叠、缩放~~ ✅（§2.4 / §2.5）
-   —— 上面 2 / 4 三项都**待你在真机上验收**
+   —— ✅ 2026-09-20 真机验收通过，安卓端至此才算真的能用
 5. **下一步建议**：阶段 2 剩下的 —— 中文字体管理（§3.2）、简繁转换（§3.3）、
    批注（§3.4，`annotations` 表已建好）、全文搜索（§3.5）
 6. 然后按阶段 3 → 4 推进，每完成一块就出包给用户验收
