@@ -43,6 +43,8 @@ export interface BookInfo {
 
 export type FlowMode = 'paginated' | 'scrolled';
 export type ThemeKey = 'light' | 'sepia' | 'dark';
+/** 中文排版的开关方式：auto = 按书籍自身的语言自动判断。 */
+export type CjkMode = 'auto' | 'on' | 'off';
 
 /** 阅读外观设置。 */
 export interface RendererSettings {
@@ -58,6 +60,8 @@ export interface RendererSettings {
   flow: FlowMode;
   /** 分栏数上限，双栏适合宽屏 */
   maxColumnCount: number;
+  /** 中文排版（首行缩进、行首禁则、中西文间距） */
+  cjkTypography: CjkMode;
 }
 
 export const DEFAULT_SETTINGS: RendererSettings = {
@@ -68,7 +72,15 @@ export const DEFAULT_SETTINGS: RendererSettings = {
   theme: 'light',
   flow: 'paginated',
   maxColumnCount: 1,
+  cjkTypography: 'auto',
 };
+
+/** 中文排版开关的可选项，供设置面板渲染。 */
+export const CJK_MODE_CHOICES: { label: string; value: CjkMode; hint: string }[] = [
+  { label: '自动', value: 'auto', hint: '按书籍语言判断，中文书才套用' },
+  { label: '开', value: 'on', hint: '任何书都套用中文排版' },
+  { label: '关', value: 'off', hint: '沿用书籍自带排版' },
+];
 
 /** 主题配色。正文容器与页面背景都取这里的值，保证观感一致。 */
 export const THEMES: Record<ThemeKey, { name: string; bg: string; fg: string; muted: string }> = {

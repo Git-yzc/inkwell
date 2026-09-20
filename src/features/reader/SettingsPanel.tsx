@@ -1,4 +1,5 @@
 import {
+  CJK_MODE_CHOICES,
   type FlowMode,
   FONT_CHOICES,
   type RendererSettings,
@@ -103,6 +104,25 @@ export default function SettingsPanel({ settings, onChange, onReset, onClose }: 
               </option>
             ))}
           </select>
+        </Row>
+
+        <Row label="中文排版">
+          <div className="flex gap-2">
+            {CJK_MODE_CHOICES.map((c) => {
+              const active = settings.cjkTypography === c.value;
+              return (
+                <button
+                  key={c.value}
+                  type="button"
+                  title={c.hint}
+                  onClick={() => onChange({ cjkTypography: c.value })}
+                  className={`${buttonBase} ${active ? 'border-amber-200/70 text-amber-100' : 'border-neutral-700 text-neutral-400 hover:border-neutral-600'}`}
+                >
+                  {c.label}
+                </button>
+              );
+            })}
+          </div>
         </Row>
 
         <Row label="主题">

@@ -162,27 +162,34 @@ myEpubReader/                     # 仓库目录（应用名是 Inkwell，二者
 
 > 阶段 0 完成后才可用。骨架尚未搭建时以下命令会失败。
 
-### 5.0 项目进度（2026-09-19）
+### 5.0 项目进度（2026-09-20）
 
 | 阶段 | 状态 |
 | --- | --- |
 | 阶段 0：环境与骨架 | ✅ 完成（双端出包跑通） |
 | 阶段 1：MVP 阅读器 | ✅ 完成，**用户已验收通过** |
-| 阶段 2 及以后 | ⏸️ **暂停**，任务清单见 `docs/BACKLOG.md` |
+| 阶段 2：中文化 + 批注 + 搜索 | 🔄 进行中：中文排版 ✅；中文字体 / 简繁转换 / 批注 / 全文搜索待做 |
+| 阶段 3 及以后 | ⏸️ 未开始 |
 
 **阶段 1 已交付的能力**：书库（导入/封面/搜索/排序/删除）、阅读器
 （目录跳转、翻页与滚动、滚轮与点按与方向键翻页、CFI 精确进度）、阅读设置
 （字号/行距/边距/字体/主题/分栏）。
 
-**已修复**：翻页模式下的鼠标滚轮翻页（详见 `docs/BACKLOG.md` §2.1）。
+**阶段 2 已交付**：中文排版 —— 首行缩进 2 字、行首禁则、中西文自动间距与标点挤压，
+自动 / 开 / 关三档（详见 `docs/BACKLOG.md` §3.1）。
+
+**已修复**：
+
+- 翻页模式下的鼠标滚轮翻页（`docs/BACKLOG.md` §2.1）
+- Android 发布包一启动就报 `Failed to request http://localhost:1420/`（`docs/BACKLOG.md` §2.2）
 
 **实测产物**（`personal/out/` 下有副本）：
 
 | 产物 | 路径 | 大小 |
 | --- | --- | --- |
-| Windows 安装包 | `src-tauri/target/release/bundle/nsis/Inkwell_0.1.0_x64-setup.exe` | 2.65 MB |
-| Android APK（arm64，手机用） | `src-tauri/gen/android/app/build/outputs/apk/arm64/release/app-arm64-release.apk` | 11 MB |
-| Android APK（universal，全架构） | 同上目录 `universal/release/` | 35 MB |
+| Windows 安装包 | `src-tauri/target/release/bundle/nsis/Inkwell_0.1.0_x64-setup.exe` | 2.66 MB |
+| Android APK（arm64，手机用） | `src-tauri/gen/android/app/build/outputs/apk/arm64/release/app-arm64-release.apk` | 10.5 MB |
+| Android APK（universal，全架构） | 同上目录 `universal/release/` | 33.8 MB |
 
 > 🔐 **已签名**：Android 发布包用 `personal/keystore/inkwell.jks` 签名（证书与密码都已 gitignore，
 > 凭据另存于 `personal/keystore/credentials.txt`）。

@@ -102,8 +102,46 @@ function toLocation(raw: FoliateLocation | null, fallbackSectionTotal: number): 
   };
 }
 
-/** 按设置拼出注入书籍文档的 CSS。 */
-function buildCss(s: RendererSettings): string {
+/**
+ * 语言标签是否属于「该套用中文排版」的语种。
+ *
+ * 中日韩共用 CJK 标点与断行规则，首行缩进也是这几门语言书籍的惯例；
+ * 西文书不该缩进，所以必须先判断语言再决定要不要输出这些规则。
+ * 除了 zh / ja / ko，还接受 ISO 639-2/3 的写法（chi、cmn、yue、jpn、kor）。
+ */
+export function isCjkLanguage(tag: string | null | undefined): boolean {
+  if (!tag) return false;
+  return /^(zh|ja|ko|chi|cmn|yue|wuu|jpn|kor)/i.test(tag.trim());
+}
+
+/**
+ * 中文排版规则。只在判定为 CJK 书籍时追加。
+ *
+ * 三条规则分别对应：
+ * 1. 首行缩进两字 —— 中文书籍靠缩进而非段间距区分段落
+ * 2. 行首禁则 —— 不允许 。，、」 等标点出现在行首
+ * 3. 中西文间距 / 标点挤压 —— 后两条属性较新，不支持的 WebView 会直接忽略，
+ *    属于「有则更好」，不会影响基本排版（见 docs/BACKLOG.md 的实测记录）
+ */
+const CJK_CSS = `
+    /* 1. 首行缩进两字 */
+    p, dd { text-indent: 2em; }
+
+    /* 标题、表格、图注、列表项里的段落不该缩进；作者指定了对齐方式的同理 */
+    h1, h2, h3, h4, h5, h6, figcaption, caption, th, td, li p, li dd,
+    [align], [align='center'], [align='right'] { text-indent: 0; }
+
+    /* 2. 行首禁则 + 3. 中西文间距与标点挤压 */
+    html {
+      line-break: strict;
+      hanging-punctuation: allow-end last;
+      text-autospace: normal;
+      text-spacing-trim: normal;
+    }
+`;
+
+/** 按设置拼出注入书籍文档的 CSS。cjk 为 true 时追加中文排版规则。 */
+function buildCss(s: RendererSettings, cjk: boolean): string {
   const theme = THEMES[s.theme];
   const family = s.fontFamily ? `font-family: ${s.fontFamily} !important;` : '';
 
@@ -145,6 +183,8 @@ function buildCss(s: RendererSettings): string {
     aside[epub|type~="footnote"],
     aside[epub|type~="note"],
     aside[epub|type~="rearnote"] { display: none; }
+
+    ${cjk ? CJK_CSS : ''}
   `;
 }
 
@@ -272,8 +312,21 @@ export class ReaderEngine {
 
     // setStyles 会把 CSS 注入书籍文档；fixed-layout（漫画）不套用文字排版
     if (this.#view.book?.rendition?.layout !== 'pre-paginated') {
-      renderer.setStyles?.(buildCss(s));
+      renderer.setStyles?.(buildCss(s, this.#resolveCjk(s)));
     }
+  }
+
+  /**
+   * 这本书要不要套用中文排版。
+   *
+   * auto 只看**书籍自身**的语言，不拿 navigator.language 兜底：界面是中文的，
+   * 用界面语言兜底会把英文书也判成中文，正好把「英文书不缩进」这条给毁了。
+   * 语言元数据缺失时按「不套用」处理 —— 不动版式比猜错版式好，用户可在设置里手动改成「开」。
+   */
+  #resolveCjk(s: RendererSettings): boolean {
+    if (s.cjkTypography === 'on') return true;
+    if (s.cjkTypography === 'off') return false;
+    return isCjkLanguage(pickText(this.#view.book?.metadata?.language));
   }
 
   /* ------------------------------------------------------------ 滚轮翻页 */
