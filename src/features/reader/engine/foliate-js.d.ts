@@ -26,6 +26,21 @@ declare module 'foliate-js/view.js' {
     resolveNavigation(target: string | number): Promise<{ index: number; anchor: unknown } | null>;
     getSectionFractions(): number[];
 
+    /**
+     * 加一条批注。`annotation.value` 是 CFI；`remove` 为 true 时是删除。
+     *
+     * 内核只负责解析 CFI 与取 range，**实际怎么画由我们决定** ——
+     * 它会发 `draw-annotation` 事件，把 draw 回调交回来（见 engine/index.ts）。
+     */
+    addAnnotation(
+      annotation: { value: string; [k: string]: unknown },
+      remove?: boolean,
+    ): Promise<{ index: number; label: string }>;
+    deleteAnnotation(annotation: { value: string }): Promise<{ index: number; label: string }>;
+
+    /** 清掉所有书籍文档里的选区。 */
+    deselect(): void;
+
     /** 已打开的书籍对象：metadata / toc / sections / dir 等。 */
     book: FoliateBook | null;
     /** 实际渲染器（paginator 或 fixed-layout）。 */
@@ -59,4 +74,37 @@ declare module 'foliate-js/view.js' {
   export interface FoliateRenderer extends HTMLElement {
     setStyles?: (css: string) => void;
   }
+}
+
+declare module 'foliate-js/overlayer.js' {
+  /**
+   * 批注/搜索结果的绘制层。
+   *
+   * ⚠️ 它的 SVG 挂在**应用文档**里（paginator 把它 append 到自己的容器上），
+   * 不是书籍 iframe 里 —— 所以控制它外观的 CSS 变量要写在 globals.css，
+   * 写进注入书籍的样式里是没用的。
+   */
+  export class Overlayer {
+    element: SVGElement;
+    add(
+      key: string,
+      range: Range | ((root: Node) => Range),
+      draw: DrawFunction,
+      options?: Record<string, unknown>,
+    ): void;
+    remove(key: string): void;
+    redraw(): void;
+    hitTest(point: { x: number; y: number }): [string, Range] | [];
+
+    /** 半透明色块，颜色由 options.color 指定。 */
+    static highlight(rects: DOMRectList, options?: { color?: string }): SVGGElement;
+    static underline(rects: DOMRectList, options?: { color?: string; width?: number }): SVGGElement;
+    static squiggly(rects: DOMRectList, options?: { color?: string; width?: number }): SVGGElement;
+    static outline(
+      rects: DOMRectList,
+      options?: { color?: string; width?: number; radius?: number },
+    ): SVGGElement;
+  }
+
+  export type DrawFunction = (rects: DOMRectList, options?: Record<string, unknown>) => SVGElement;
 }

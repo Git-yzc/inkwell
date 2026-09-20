@@ -75,6 +75,58 @@ export const DEFAULT_SETTINGS: RendererSettings = {
   cjkTypography: 'auto',
 };
 
+/**
+ * 交给渲染引擎的高亮。
+ *
+ * 引擎只负责「画出来」，业务字段（笔记、章节、时间）都留在 api.ts 的类型里。
+ * 书签不需要画，所以不往这里传。
+ */
+export interface HighlightView {
+  /** EPUB CFI（range）。foliate 拿它当 overlayer 的 key，同一 CFI 重复添加会覆盖 */
+  cfi: string;
+  /** 高亮色名 */
+  color: string | null;
+}
+
+/**
+ * 正文里当前选中的一段文字。
+ *
+ * `rect` 用的是**顶层视口**坐标（已把书籍 iframe 的位置加回去），
+ * UI 拿它减去正文容器的位置即可定位浮层。
+ */
+export interface SelectionInfo {
+  text: string;
+  cfi: string;
+  rect: { x: number; y: number; width: number; height: number };
+}
+
+/**
+ * 高亮色名 → 色值。
+ *
+ * Overlayer 会再叠一层透明度（`--overlayer-highlight-opacity`，见 globals.css），
+ * 所以这里给饱和色即可。色值只活在前端，库里存的是色名。
+ *
+ * ⚠️ 色名清单与 Rust 侧 `annotation::COLORS`、`api.ts` 的 `HighlightColor` 三处对应，
+ * 加颜色时一起改。
+ */
+export const HIGHLIGHT_COLORS = {
+  yellow: '#ffd400',
+  green: '#3ecf6a',
+  blue: '#3a9bff',
+  pink: '#ff6fb5',
+} as const;
+
+export type HighlightColorName = keyof typeof HIGHLIGHT_COLORS;
+
+/** 色名 → 色值；未知色名回落到黄色（库里的旧数据或将来加的颜色都可能对不上）。 */
+export function highlightColor(name: string | null | undefined): string {
+  if (name && name in HIGHLIGHT_COLORS) return HIGHLIGHT_COLORS[name as HighlightColorName];
+  return HIGHLIGHT_COLORS.yellow;
+}
+
+/** 色块的展示顺序（工具栏按这个顺序排）。 */
+export const HIGHLIGHT_COLOR_ORDER: HighlightColorName[] = ['yellow', 'green', 'blue', 'pink'];
+
 /** 中文排版开关的可选项，供设置面板渲染。 */
 export const CJK_MODE_CHOICES: { label: string; value: CjkMode; hint: string }[] = [
   { label: '自动', value: 'auto', hint: '按书籍语言判断，中文书才套用' },

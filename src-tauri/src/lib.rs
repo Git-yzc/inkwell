@@ -4,8 +4,10 @@
 //!   - `db`      SQLite 连接与迁移
 //!   - `epub`    EPUB 元数据/封面解析
 //!   - `library` 书库业务逻辑（导入、查询、删除、进度）
+//!   - `annotation` 批注（高亮 / 笔记 / 书签）与导出
 //!   - 本文件     Tauri 状态、command 注册、插件装配
 
+mod annotation;
 mod db;
 mod epub;
 mod error;
@@ -400,6 +402,125 @@ fn touch_book(state: tauri::State<'_, AppState>, id: String) -> Result<()> {
     library::touch(&conn, &id)
 }
 
+/* ------------------------------------------------------------------ 批注 */
+
+/// 某本书的全部批注，新的排前面。
+#[tauri::command]
+fn list_annotations(
+    state: tauri::State<'_, AppState>,
+    book_id: String,
+) -> Result<Vec<annotation::Annotation>> {
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| Error::Other("数据库锁已损坏".into()))?;
+    annotation::list(&conn, &book_id)
+}
+
+/// 新增批注。`kind` 为 highlight / bookmark，`color` 为色名。
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn add_annotation(
+    state: tauri::State<'_, AppState>,
+    book_id: String,
+    kind: String,
+    cfi: String,
+    text: Option<String>,
+    note: Option<String>,
+    color: Option<String>,
+    chapter: Option<String>,
+) -> Result<annotation::Annotation> {
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| Error::Other("数据库锁已损坏".into()))?;
+    annotation::add(
+        &conn,
+        &book_id,
+        &kind,
+        &cfi,
+        text.as_deref(),
+        note.as_deref(),
+        color.as_deref(),
+        chapter.as_deref(),
+    )
+}
+
+/// 改笔记与颜色（cfi 与原文不允许改）。
+#[tauri::command]
+fn update_annotation(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    note: Option<String>,
+    color: Option<String>,
+) -> Result<()> {
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| Error::Other("数据库锁已损坏".into()))?;
+    annotation::update(&conn, &id, note.as_deref(), color.as_deref())
+}
+
+#[tauri::command]
+fn delete_annotation(state: tauri::State<'_, AppState>, id: String) -> Result<()> {
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| Error::Other("数据库锁已损坏".into()))?;
+    annotation::delete(&conn, &id)
+}
+
+/// 把某本书的批注导出到 `path`。返回写入的条目数。
+///
+/// 刻意放在 Rust 侧写文件：前端拿不到任意路径的 fs 权限，
+/// 而 Android 的「另存为」给的还是 content:// URI，前端更写不了。
+#[tauri::command]
+fn export_annotations(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    book_id: String,
+    path: String,
+    format: String,
+) -> Result<usize> {
+    let (title, list) = {
+        let conn = state
+            .conn
+            .lock()
+            .map_err(|_| Error::Other("数据库锁已损坏".into()))?;
+        let book = library::get(&conn, &book_id)?
+            .ok_or_else(|| Error::Other("这本书不在书库里".into()))?;
+        (book.title, annotation::list(&conn, &book_id)?)
+    };
+
+    let body = match format.as_str() {
+        "json" => serde_json::to_string_pretty(&list)
+            .map_err(|e| Error::Other(format!("生成 JSON 失败：{e}")))?,
+        "markdown" => annotation::to_markdown(&title, &list),
+        other => return Err(Error::Other(format!("不支持的导出格式：{other}"))),
+    };
+
+    write_export(&app, &path, body.as_bytes())?;
+    Ok(list.len())
+}
+
+/// 写导出文件。`path` 可能是普通路径，也可能是 Android「另存为」给的 content:// URI。
+fn write_export(app: &tauri::AppHandle, path: &str, bytes: &[u8]) -> Result<()> {
+    use std::io::Write;
+
+    let mut opts = OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+
+    let mut file = app
+        .fs()
+        .open(
+            FilePath::from_str(path).expect("FilePath::from_str 不会失败"),
+            opts,
+        )
+        .map_err(|e| Error::Other(format!("无法写入所选位置：{e}")))?;
+    file.write_all(bytes)?;
+    Ok(())
+}
+
 #[tauri::command]
 fn rename_book(
     state: tauri::State<'_, AppState>,
@@ -487,6 +608,11 @@ pub fn run() {
             touch_book,
             save_progress,
             rename_book,
+            list_annotations,
+            add_annotation,
+            update_annotation,
+            delete_annotation,
+            export_annotations,
         ])
         .run(tauri::generate_context!())
         .expect("启动 Tauri 应用失败");

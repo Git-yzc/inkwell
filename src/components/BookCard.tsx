@@ -84,7 +84,9 @@ export default function BookCard({ book, onOpen, onDelete }: Props) {
           onDelete(book);
         }}
         aria-label="删除"
-        className="absolute top-2 left-2 hidden h-7 w-7 cursor-pointer items-center justify-center rounded bg-black/70 text-neutral-300 transition hover:bg-red-900/90 hover:text-red-100 group-hover:flex"
+        // ⚠️ pointer-coarse 不能省：安卓上没有 hover，只写 group-hover 的话
+        // 触摸设备永远看不到删除按钮（批注列表也踩过同样的坑）。
+        className="absolute top-2 left-2 hidden h-7 w-7 cursor-pointer items-center justify-center rounded bg-black/70 text-neutral-300 transition hover:bg-red-900/90 hover:text-red-100 group-hover:flex pointer-coarse:flex"
       >
         ✕
       </button>

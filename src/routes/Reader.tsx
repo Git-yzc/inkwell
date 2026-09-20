@@ -1,15 +1,26 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { save as saveDialog } from '@tauri-apps/plugin-dialog';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import AnnotationEditor, { type EditorTarget } from '@/features/annotation/AnnotationEditor';
+import AnnotationPanel from '@/features/annotation/AnnotationPanel';
 import { ReaderEngine } from '@/features/reader/engine';
 import {
   type BookInfo,
+  type HighlightView,
   type RendererSettings,
   THEMES,
   type TocItem,
 } from '@/features/reader/engine/types';
 import SettingsPanel from '@/features/reader/SettingsPanel';
 import TocPanel from '@/features/reader/TocPanel';
-import { api, type Book, readableError } from '@/lib/api';
+import {
+  type Annotation,
+  api,
+  type Book,
+  type ExportFormat,
+  type HighlightColor,
+  readableError,
+} from '@/lib/api';
 import { formatPercent } from '@/lib/util';
 import { useReaderSettings } from '@/store/reader-settings';
 
@@ -39,11 +50,49 @@ export default function Reader() {
 
   const [showToc, setShowToc] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showAnnotations, setShowAnnotations] = useState(false);
   const [fraction, setFraction] = useState(0);
   const [chapter, setChapter] = useState<string | null>(null);
   const [barVisible, setBarVisible] = useState(true);
 
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+  /**
+   * 当前页的 CFI。
+   *
+   * 和 lastLocRef 存的是同一件事，但用途不同：ref 给「只注册一次的引擎监听器」
+   * 读最新值，state 给渲染用（书签按钮要跟着翻页变色）。
+   * 反正每次 relocate 本来就会 setFraction 触发重渲染，多这一个 state 不额外花钱。
+   */
+  const [currentCfi, setCurrentCfi] = useState<string | null>(null);
+  /** 划词浮层 / 批注编辑面板；null 表示不显示 */
+  const [editor, setEditor] = useState<EditorTarget | null>(null);
+  const [annotationBusy, setAnnotationBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  /** 正文容器的尺寸与位置，用来把选区坐标换算成容器内坐标 */
+  const [hostBox, setHostBox] = useState({ left: 0, top: 0, width: 0 });
+
   const theme = THEMES[settings.theme];
+
+  /**
+   * 最近一次 relocate 的结果。
+   *
+   * 放 ref 不放 state：翻页时它每页都变，进 state 会让整页重渲染；
+   * 只有「加书签」这种点击时才需要读它。
+   */
+  /**
+   * 批注列表的 ref 镜像。
+   *
+   * 引擎的点击回调只注册一次，闭包里的 annotations 会永远是初始值；
+   * 之前靠 setAnnotations 的函数式更新「顺手」读最新值，但那是在更新函数里做副作用，
+   * React 严格模式下会重复执行 —— 读 ref 才是正经做法。
+   */
+  const annotationsRef = useRef<Annotation[]>([]);
+  annotationsRef.current = annotations;
+
+  const lastLocRef = useRef<{ cfi: string | null; chapter: string | null }>({
+    cfi: null,
+    chapter: null,
+  });
 
   // ---- 载入书籍 ----
   useEffect(() => {
@@ -92,6 +141,8 @@ export default function Reader() {
     const offRelocate = engine.onRelocate((loc) => {
       setFraction(loc.fraction);
       setChapter(loc.chapterLabel);
+      setCurrentCfi(loc.cfi);
+      lastLocRef.current = { cfi: loc.cfi, chapter: loc.chapterLabel };
 
       // 节流写库：位置变化先攒着，停止翻页一会儿后再落库
       if (loc.cfi !== null && loc.cfi !== lastSavedCfi) {
@@ -104,6 +155,22 @@ export default function Reader() {
           });
         }, PROGRESS_SAVE_MS);
       }
+    });
+
+    // 划词 → 弹浮层
+    const offSelection = engine.onSelection((sel) => {
+      if (!sel) return;
+      setEditor({
+        mode: 'new',
+        selection: sel,
+        chapter: lastLocRef.current.chapter,
+      });
+    });
+
+    // 点中已有高亮 → 打开编辑
+    const offAnnotationClick = engine.onAnnotationClick((cfi) => {
+      const hit = annotationsRef.current.find((a) => a.cfi === cfi && a.type === 'highlight');
+      if (hit) setEditor({ mode: 'edit', annotation: hit });
     });
 
     (async () => {
@@ -124,10 +191,57 @@ export default function Reader() {
       disposed = true;
       window.clearTimeout(saveTimer);
       offRelocate();
+      offSelection();
+      offAnnotationClick();
       engine.close();
       engineRef.current = null;
     };
   }, [book]);
+
+  // ---- 载入这本书的批注 ----
+  useEffect(() => {
+    if (!book) return;
+    let cancelled = false;
+    void api
+      .listAnnotations(book.id)
+      .then((list) => {
+        if (!cancelled) setAnnotations(list);
+      })
+      .catch((e) => {
+        // 批注读不出来不该挡住读书，只在控制台留痕
+        console.error('读取批注失败', e);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [book]);
+
+  // ---- 批注变化时同步给渲染引擎（引擎只画高亮，书签不用画）----
+  useEffect(() => {
+    const highlights: HighlightView[] = annotations
+      .filter((a) => a.type === 'highlight')
+      .map((a) => ({ cfi: a.cfi, color: a.color }));
+    engineRef.current?.setHighlights(highlights);
+  }, [annotations]);
+
+  // ---- 量一下正文容器的位置：选区的视口坐标要减掉它才能定位浮层 ----
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const measure = () => {
+      const r = host.getBoundingClientRect();
+      setHostBox({ left: r.left, top: r.top, width: r.width });
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(host);
+    window.addEventListener('resize', measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+    // hostRef 挂的 div 一直存在，尺寸变化由 ResizeObserver 兜住，不需要别的依赖
+  }, []);
 
   // ---- 设置变化时实时套用（不重建引擎）----
   useEffect(() => {
@@ -199,9 +313,145 @@ export default function Reader() {
 
   const toc = useMemo(() => info?.toc ?? [], [info]);
 
+  /** 当前页有没有书签。 */
+  const bookmarkHere =
+    currentCfi !== null && annotations.some((a) => a.type === 'bookmark' && a.cfi === currentCfi);
+
   function handleTocSelect(item: TocItem) {
     setShowToc(false);
     if (item.href) void engineRef.current?.goTo(item.href);
+  }
+
+  /* ---------------------------------------------------------------- 批注 */
+
+  /** 新增一条高亮。cfi / 原文都来自选区，章节取当前章。 */
+  const createHighlight = useCallback(
+    async (
+      cfi: string,
+      text: string,
+      chapter: string | null,
+      color: HighlightColor,
+      note: string | null,
+    ) => {
+      if (!book) return;
+      setAnnotationBusy(true);
+      try {
+        const created = await api.addAnnotation({
+          bookId: book.id,
+          kind: 'highlight',
+          cfi,
+          text,
+          chapter,
+          color,
+          note,
+        });
+        setAnnotations((list) => [created, ...list]);
+        engineRef.current?.clearSelection();
+        setEditor(null);
+      } catch (e) {
+        setError(`添加高亮失败：${readableError(e)}`);
+      } finally {
+        setAnnotationBusy(false);
+      }
+    },
+    [book],
+  );
+
+  async function handleEditorSave(patch: { color: HighlightColor | null; note: string | null }) {
+    if (!editor) return;
+
+    if (editor.mode === 'new') {
+      await createHighlight(
+        editor.selection.cfi,
+        editor.selection.text,
+        editor.chapter,
+        patch.color ?? 'yellow',
+        patch.note,
+      );
+      return;
+    }
+
+    setAnnotationBusy(true);
+    try {
+      await api.updateAnnotation(editor.annotation.id, patch.note, patch.color);
+      setAnnotations((list) =>
+        list.map((a) =>
+          a.id === editor.annotation.id ? { ...a, note: patch.note, color: patch.color } : a,
+        ),
+      );
+      setEditor(null);
+    } catch (e) {
+      setError(`保存批注失败：${readableError(e)}`);
+    } finally {
+      setAnnotationBusy(false);
+    }
+  }
+
+  async function handleAnnotationDelete(target: Annotation) {
+    setAnnotationBusy(true);
+    try {
+      await api.deleteAnnotation(target.id);
+      setAnnotations((list) => list.filter((a) => a.id !== target.id));
+      setEditor(null);
+    } catch (e) {
+      setError(`删除批注失败：${readableError(e)}`);
+    } finally {
+      setAnnotationBusy(false);
+    }
+  }
+
+  /** 加/去当前页的书签。 */
+  async function toggleBookmark() {
+    if (!book) return;
+    const { cfi, chapter: ch } = lastLocRef.current;
+    if (!cfi) return;
+
+    const existing = annotations.find((a) => a.type === 'bookmark' && a.cfi === cfi);
+    if (existing) {
+      await handleAnnotationDelete(existing);
+      return;
+    }
+
+    try {
+      const created = await api.addAnnotation({
+        bookId: book.id,
+        kind: 'bookmark',
+        cfi,
+        chapter: ch,
+      });
+      setAnnotations((list) => [created, ...list]);
+    } catch (e) {
+      setError(`添加书签失败：${readableError(e)}`);
+    }
+  }
+
+  function handleAnnotationJump(a: Annotation) {
+    setShowAnnotations(false);
+    setEditor(null);
+    void engineRef.current?.goTo(a.cfi);
+  }
+
+  /** 导出。写文件在 Rust 侧做 —— 前端没有任意路径的 fs 权限，Android 上更拿不到。 */
+  async function handleExport(format: ExportFormat) {
+    if (!book) return;
+    const ext = format === 'json' ? 'json' : 'md';
+    const target = await saveDialog({
+      title: '导出批注',
+      defaultPath: `${book.title} · 批注.${ext}`,
+      filters: [{ name: format === 'json' ? 'JSON' : 'Markdown', extensions: [ext] }],
+    });
+    if (!target) return;
+
+    setExporting(true);
+    try {
+      const count = await api.exportAnnotations(book.id, target, format);
+      setError(null);
+      window.alert(`已导出 ${count} 条批注到：\n${target}`);
+    } catch (e) {
+      setError(`导出失败：${readableError(e)}`);
+    } finally {
+      setExporting(false);
+    }
   }
 
   return (
@@ -240,9 +490,20 @@ export default function Reader() {
 
         <button
           type="button"
+          onClick={() => void toggleBookmark()}
+          aria-label={bookmarkHere ? '去掉书签' : '加书签'}
+          title={bookmarkHere ? '去掉书签' : '加书签'}
+          className="cursor-pointer rounded px-2 py-1 text-sm hover:bg-black/5"
+          style={{ color: bookmarkHere ? '#e0b64a' : theme.muted }}
+        >
+          {bookmarkHere ? '★' : '☆'}
+        </button>
+        <button
+          type="button"
           onClick={() => {
             setShowToc((v) => !v);
             setShowSettings(false);
+            setShowAnnotations(false);
           }}
           className="cursor-pointer rounded px-2 py-1 text-sm hover:bg-black/5"
           style={{ color: theme.muted }}
@@ -252,8 +513,21 @@ export default function Reader() {
         <button
           type="button"
           onClick={() => {
+            setShowAnnotations((v) => !v);
+            setShowToc(false);
+            setShowSettings(false);
+          }}
+          className="cursor-pointer rounded px-2 py-1 text-sm hover:bg-black/5"
+          style={{ color: showAnnotations ? '#e0b64a' : theme.muted }}
+        >
+          批注{annotations.length > 0 ? ` ${annotations.length}` : ''}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
             setShowSettings((v) => !v);
             setShowToc(false);
+            setShowAnnotations(false);
           }}
           className="cursor-pointer rounded px-2 py-1 text-sm hover:bg-black/5"
           style={{ color: theme.muted }}
@@ -286,6 +560,27 @@ export default function Reader() {
               返回书库
             </button>
           </div>
+        )}
+
+        {/* 划词浮层 / 批注编辑。放在正文之上、点按区之下 */}
+        {editor !== null && (
+          <AnnotationEditor
+            target={editor}
+            theme={settings.theme}
+            containerWidth={hostBox.width}
+            containerRect={{ left: hostBox.left, top: hostBox.top }}
+            busy={annotationBusy}
+            onSave={(patch) => void handleEditorSave(patch)}
+            onDelete={
+              editor.mode === 'edit'
+                ? () => void handleAnnotationDelete(editor.annotation)
+                : undefined
+            }
+            onCancel={() => {
+              engineRef.current?.clearSelection();
+              setEditor(null);
+            }}
+          />
         )}
 
         {/* 左右点按翻页。放在正文之上但避开面板区域 */}
@@ -338,6 +633,18 @@ export default function Reader() {
       {showToc && (
         <div className="absolute inset-y-0 left-0 z-30" style={{ top: 48 }}>
           <TocPanel toc={toc} onSelect={handleTocSelect} onClose={() => setShowToc(false)} />
+        </div>
+      )}
+      {showAnnotations && (
+        <div className="absolute inset-y-0 right-0 z-30" style={{ top: 48 }}>
+          <AnnotationPanel
+            annotations={annotations}
+            exporting={exporting}
+            onJump={handleAnnotationJump}
+            onDelete={(a) => void handleAnnotationDelete(a)}
+            onExport={(fmt) => void handleExport(fmt)}
+            onClose={() => setShowAnnotations(false)}
+          />
         </div>
       )}
       {showSettings && (

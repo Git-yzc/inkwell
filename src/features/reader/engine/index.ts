@@ -18,12 +18,16 @@ import { readFile } from '@tauri-apps/plugin-fs';
 // HTMLElement，调用 open() 直接报 "open is not a function"（实测踩过这个坑）。
 // 显式保留一条副作用导入即可。
 import 'foliate-js/view.js';
+import { Overlayer } from 'foliate-js/overlayer.js';
 import type { FoliateLocation, FoliateTocItem, View } from 'foliate-js/view.js';
 
 import {
   type BookInfo,
+  type HighlightView,
+  highlightColor,
   type ReaderLocation,
   type RendererSettings,
+  type SelectionInfo,
   THEMES,
   type TocItem,
 } from './types';
@@ -36,6 +40,17 @@ export interface OpenOptions {
 
 type RelocateListener = (loc: ReaderLocation) => void;
 type LoadListener = (e: { index: number }) => void;
+type SelectionListener = (sel: SelectionInfo | null) => void;
+type AnnotationClickListener = (cfi: string) => void;
+
+/** foliate 画批注时交回来的东西（见 view.js 的 addAnnotation）。 */
+interface DrawAnnotationDetail {
+  draw: (drawer: typeof Overlayer.highlight, options: { color: string }) => void;
+  annotation: { color?: string | null };
+}
+
+/** 选区防抖：拖拽时 selectionchange 会连发，等手停一下再弹浮层。 */
+const SELECTION_DEBOUNCE_MS = 150;
 
 /** 滚轮累积多少像素才翻一页。 */
 const WHEEL_STEP = 50;
@@ -194,11 +209,20 @@ export class ReaderEngine {
   #sectionCount = 0;
   #relocateListeners = new Set<RelocateListener>();
   #loadListeners = new Set<LoadListener>();
+  #selectionListeners = new Set<SelectionListener>();
+  #annotationClickListeners = new Set<AnnotationClickListener>();
   #opened = false;
   /** 已挂上滚轮监听的书籍文档；换章节会换文档，用它去重 */
   #wheelDoc: Document | null = null;
   #wheelAccum = 0;
   #wheelUnlockAt = 0;
+  /** 已挂上选区监听的书籍文档（同样要按文档去重） */
+  #selectionDoc: Document | null = null;
+  #selectionTimer: number | undefined;
+  /** 当前显示章节的序号，选区算 CFI 时要用 */
+  #sectionIndex = 0;
+  /** 当前书的高亮，key 是 CFI（foliate 也拿 CFI 当 overlayer 的 key） */
+  #highlights = new Map<string, HighlightView>();
 
   constructor(host: HTMLElement, settings: RendererSettings) {
     this.#settings = settings;
@@ -217,14 +241,44 @@ export class ReaderEngine {
 
     this.#view.addEventListener('load', (e) => {
       const detail = (e as CustomEvent<{ doc?: Document; index: number }>).detail;
-      // 换章节时内核会重建 iframe 文档，样式和滚轮监听都要重新挂
+      // 换章节时内核会重建 iframe 文档，样式、滚轮与选区监听都要重新挂
       this.#applyRendererAttributes();
       this.#bindWheel(detail?.doc);
+      this.#bindSelection(detail?.doc);
+      this.#sectionIndex = detail?.index ?? 0;
       for (const fn of this.#loadListeners) fn({ index: detail?.index ?? 0 });
+    });
+
+    // 内核把「画批注」这件事交回给我们：它只负责解析 CFI 与取 range，
+    // 用什么颜色、画成什么样由这边决定（见 view.js 的 addAnnotation）。
+    this.#view.addEventListener('draw-annotation', (e) => {
+      const detail = (e as CustomEvent<DrawAnnotationDetail>).detail;
+      detail.draw(Overlayer.highlight, { color: highlightColor(detail.annotation.color) });
+    });
+
+    // ⚠️ create-overlay 是在 overlayer **真正挂上去之前**发的
+    // （view.js 先 emit、后 attach），所以得等一个微任务再画，
+    // 否则 getContents() 里还没有 overlayer，批注一个都画不出来。
+    this.#view.addEventListener('create-overlay', () => {
+      void Promise.resolve().then(() => this.#drawHighlights());
+    });
+
+    // 点中已有高亮时内核会告诉我们点到了哪个 CFI
+    this.#view.addEventListener('show-annotation', (e) => {
+      const detail = (e as CustomEvent<{ value?: string }>).detail;
+      if (typeof detail?.value !== 'string') return;
+      for (const fn of this.#annotationClickListeners) fn(detail.value);
     });
   }
 
   async open(absPath: string, opts: OpenOptions = {}): Promise<BookInfo> {
+    // ⚠️ 换书要清掉上一本的高亮，而且必须清在**开头**。
+    //
+    // 批注是从本地库读的（毫秒级），open() 要几秒；新书的 setHighlights() 常常在
+    // open() 还没返回时就跑完了。清空若放在结尾，就会把刚设进来的新批注一并抹掉，
+    // 表现为「重开书后高亮全没了」（实测踩到过两次）。
+    this.#highlights.clear();
+
     const file = await loadBookFile(absPath);
     await this.#view.open(file);
 
@@ -237,6 +291,12 @@ export class ReaderEngine {
 
     this.#opened = true;
     this.#applyRendererAttributes();
+    // ⚠️ 这里必须补一次重画。
+    //
+    // setHighlights() 往往在 #opened 还是 false 的时候就跑完了 —— 那次重画会被
+    // #drawHighlights 的守卫挡掉，而 open() 期间触发的 create-overlay 同样发生在
+    // #opened 置位之前。不补这一次，重开书后高亮就不会出现在正文里。
+    void this.#drawHighlights();
 
     const fixedLayout = book?.rendition?.layout === 'pre-paginated';
     return {
@@ -253,6 +313,9 @@ export class ReaderEngine {
     this.#wheelDoc = null;
     this.#wheelAccum = 0;
     this.#wheelUnlockAt = 0;
+    this.#selectionDoc?.removeEventListener('selectionchange', this.#onSelectionChange);
+    this.#selectionDoc = null;
+    window.clearTimeout(this.#selectionTimer);
     try {
       this.#view.close();
     } catch {
@@ -261,6 +324,105 @@ export class ReaderEngine {
     this.#view.remove();
     this.#relocateListeners.clear();
     this.#loadListeners.clear();
+    this.#selectionListeners.clear();
+    this.#annotationClickListeners.clear();
+    this.#highlights.clear();
+  }
+
+  /* ---------------------------------------------------------------- 批注 */
+
+  /**
+   * 全量替换当前书的高亮（新增/改色/删除都走这里）。
+   *
+   * 列表不大（一本书几十条量级），增量维护的复杂度不值当，直接全量对齐。
+   */
+  setHighlights(list: HighlightView[]): void {
+    const next = new Map(list.map((h) => [h.cfi, h]));
+
+    // 先摘掉已经不存在的，否则删掉的高亮会一直留在画面上
+    for (const cfi of this.#highlights.keys()) {
+      if (!next.has(cfi)) void this.#view.deleteAnnotation({ value: cfi });
+    }
+
+    this.#highlights = next;
+    void this.#drawHighlights();
+  }
+
+  /** 把当前书的高亮全部交给内核去画（不在本章的会被内核自行忽略）。 */
+  async #drawHighlights(): Promise<void> {
+    if (!this.#opened) return;
+    for (const h of this.#highlights.values()) {
+      await this.#view.addAnnotation({ value: h.cfi, color: h.color });
+    }
+  }
+
+  /** 清掉正文里的选区（加完批注后调用，免得浮层一直挂着）。 */
+  clearSelection(): void {
+    if (this.#opened) this.#view.deselect();
+  }
+
+  onSelection(fn: SelectionListener): () => void {
+    this.#selectionListeners.add(fn);
+    return () => this.#selectionListeners.delete(fn);
+  }
+
+  onAnnotationClick(fn: AnnotationClickListener): () => void {
+    this.#annotationClickListeners.add(fn);
+    return () => this.#annotationClickListeners.delete(fn);
+  }
+
+  /**
+   * 监听书籍文档里的选区。
+   *
+   * 用 selectionchange 而不是 pointerup：手机上长按选词之后还会拖手柄，
+   * pointerup 早就过去了，selectionchange 才是唯一可靠的信号。
+   * 拖拽期间它连发，所以加一层防抖。
+   */
+  #bindSelection(doc: Document | undefined): void {
+    if (!doc || this.#selectionDoc === doc) return;
+    this.#selectionDoc?.removeEventListener('selectionchange', this.#onSelectionChange);
+    this.#selectionDoc = doc;
+    doc.addEventListener('selectionchange', this.#onSelectionChange);
+  }
+
+  #onSelectionChange = (): void => {
+    window.clearTimeout(this.#selectionTimer);
+    this.#selectionTimer = window.setTimeout(() => this.#emitSelection(), SELECTION_DEBOUNCE_MS);
+  };
+
+  #emitSelection(): void {
+    const info = this.#currentSelection();
+    for (const fn of this.#selectionListeners) fn(info);
+  }
+
+  #currentSelection(): SelectionInfo | null {
+    if (!this.#opened) return null;
+    const doc = this.#selectionDoc;
+    const sel = doc?.defaultView?.getSelection();
+    if (!doc || !sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+
+    const text = sel.toString().trim();
+    if (!text) return null;
+
+    const range = sel.getRangeAt(0);
+
+    // 书籍在 iframe 里：range 的 rect 是 iframe 局部坐标，
+    // 要加上 iframe 在**顶层视口**里的位置，外层 UI 才能对齐。
+    // （paginator 用 px 定位 iframe，没有 transform，所以直接相加即可。）
+    const frame = doc.defaultView?.frameElement as HTMLElement | null;
+    const frameRect = frame?.getBoundingClientRect();
+    const r = range.getBoundingClientRect();
+
+    return {
+      text,
+      cfi: this.#view.getCFI(this.#sectionIndex, range),
+      rect: {
+        x: (frameRect?.left ?? 0) + r.left,
+        y: (frameRect?.top ?? 0) + r.top,
+        width: r.width,
+        height: r.height,
+      },
+    };
   }
 
   get opened(): boolean {
