@@ -133,7 +133,18 @@ if (ndkBin) {
 console.log('[inkwell] cargo build --target ' + target + ' (' + profile + ')');
 
 const cargoArgs = ['build', '--target', target];
-if (release) cargoArgs.push('--release');
+if (release) {
+  cargoArgs.push('--release');
+
+  // 关键：release 必须开 custom-protocol，否则 tauri 的 build.rs 会把 dev 置为 true，
+  // 二进制就会去连 http://localhost:1420/ 而不是内嵌 dist/ 里的前端资源，
+  // 手机上表现为一启动就报 'Failed to request http://localhost:1420/'。
+  // 官方 CLI 在 release 时会自动加这个特性，我们绕过了 CLI，所以在这里补上。
+  //
+  // debug 不加：Gradle 的 debug 任务由 'pnpm tauri android dev --host' 驱动，
+  // 那条路要连宿主机的 devUrl（CLI 会把 devUrl 改写成局域网 IP），内嵌资源反而会坏事。
+  cargoArgs.push('--features', 'custom-protocol');
+}
 
 try {
   execFileSync('cargo', cargoArgs, { cwd: srcTauri, stdio: 'inherit', env });

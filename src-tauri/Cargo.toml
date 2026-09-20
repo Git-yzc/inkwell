@@ -35,6 +35,15 @@ thiserror = "2.0.20"
 base64 = "0.23.1"
 image = { version = "0.25.6", default-features = false, features = ["png", "jpeg", "webp"] }
 
+[features]
+# 生产构建必须开启。不开的话 tauri 的 build.rs 会把 dev 置为 true
+# （tauri-2.x/build.rs: dev = !custom_protocol），产物就会去连 devUrl
+# 而不是内嵌前端资源 —— Android 上表现为启动即报
+# "Failed to request http://localhost:1420/"。
+# 官方 CLI 在 release 时会自动加这个特性；我们的 Android shim 绕过了 CLI，
+# 所以由 src-tauri/tauri.js 显式传入。
+custom-protocol = ["tauri/custom-protocol"]
+
 # 发布版：体积优先。桌面端不需要极致的运行速度。
 [profile.release]
 codegen-units = 1

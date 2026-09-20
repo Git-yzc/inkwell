@@ -75,7 +75,7 @@
 | --- | --- | --- |
 | `pnpm install` 报 `EPERM mkdir ...\pnpm-cache` | pnpm 默认把 store/cache 放在工作目录之外，早期沙箱不允许写 | 曾重定向到仓库内，**现已移除**——那会写入本机绝对路径、换台机器就失效。pnpm 默认位置即可 |
 | 构建报 `Error: spawn EPERM` | esbuild 以**管道 stdio** 启动常驻子进程 | 用完整访问权限执行构建命令 |
-| PowerShell 5.1 把中文 `.ps1` 读成乱码 | 默认按 ANSI(GBK) 解析，需 **UTF-8 BOM** | 所有 `.ps1` 都已带 BOM；**用工具改写后必须重新补 BOM** |
+| PowerShell 5.1 把中文 `.ps1` 读成乱码 | 默认按 ANSI(GBK) 解析，需 **UTF-8 BOM** | 所有 `.ps1` 都已带 BOM；**`edit`/`write` 工具改写会把 BOM 吃掉**，改完必须用 `[System.IO.File]::WriteAllBytes` 前置 `EF BB BF` 补回，再用 `Parser::ParseFile` 验一遍语法 |
 | 经代理访问 https 报 `SEC_E_NO_CREDENTIALS` | Windows schannel 在受限令牌下拿不到凭证 | 下载一律走 `personal/scripts/download.mjs`（Node + OpenSSL） |
 | Java 工具（sdkmanager / Gradle）下载超时 | Java 的 HttpURLConnection 不读系统代理 | 给 Java 传 `JAVA_TOOL_OPTIONS=-Dhttps.proxyHost=...`；Gradle 发行包用 `fetch-gradle.mjs` 预置 |
 | Android 构建报 `Creation symbolic link is not allowed` | Tauri 用符号链接放置 `.so`，需开发者模式 | 由 `src-tauri/tauri.js` 改为复制文件（**不要删这个文件**） |
@@ -86,7 +86,10 @@
 | 书库页白屏，报 React #185 | zustand 选择器每次返回新数组，引用永不相等 → 无限重渲染 | 选择器只收纯数据，组件侧用 `useMemo` 派生 |
 | `biome format` 改写了 submodule | `files.includes` 未排除 `packages/`，把第三方源码全重排了 | includes 里已加 `!**/packages`；**别删这条** |
 | 安装包装到奇怪的位置 | NSIS 的 `RestorePreviousInstallLocation` 会读注册表里上次的位置 | 删掉 `HKCU\Software\inkwell\Inkwell` 后重装 |
+| **Gradle wrapper 说没有发行包、转去重新下载然后 `Read timed out`** | Java 的 `user.home` 取自 **Windows 用户配置目录**（进程令牌），**不读 `USERPROFILE` 环境变量**。若 shell 里的 `USERPROFILE` 与真实配置目录不一致，`fetch-gradle.mjs`（按 `USERPROFILE` 放）和 Gradle（按 `user.home` 找）就各说各话 | 显式设 `GRADLE_USER_HOME=<真实配置目录>\.gradle` 再跑 Gradle。同一台机器上 `LOCALAPPDATA` 也会影响 NSIS 缓存（`%LOCALAPPDATA%\tauri\NSIS`），出 Windows 包时同样要指对 |
 | **Android 装不上，报 `packageinfo is null`** | 打出来的 APK **没有签名**（文件名带 `-unsigned`）。未签名在 Android 上是硬失败，不是「只提示未知来源」 | 配好 `src-tauri/gen/android/keystore.properties`；`build-android.ps1` 已加 `apksigner verify` 校验，未签名直接失败 |
+| **Android 发布包一启动就报 `Failed to request http://localhost:1420/`** | 我们的 Android shim 只调 `cargo build --release`，没带官方 CLI 会加的 `custom-protocol` 特性 → tauri 的 `build.rs` 把 `dev` 置为 true → **不内嵌前端资源**，改去连 devUrl | `Cargo.toml` 的 `[features] custom-protocol` 与 `tauri.js` release 分支的 `--features custom-protocol` **两处都得留着**；`build-android.ps1` 已加硬性校验（从 APK 里解 `.so` 搜 `index-*.js`）。⚠️ 判据只能是 `index-*.js`，`localhost:1420` 字符串修复前后都在二进制里，拿它当判据会得出反结论 |
+| **改了界面，重新出包装上去还是旧界面** | cargo **不跟踪 `dist/`**——`tauri-build` 只为 sidecar / resources / 配置文件声明 `rerun-if-changed`，所以前端变了不会重编 crate，旧资源继续内嵌 | `src-tauri/build.rs` 里的 `cargo:rerun-if-changed=../dist` **别删** |
 
 ---
 

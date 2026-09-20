@@ -3,7 +3,7 @@
 > 本文档记录**尚未完成**的工作与**已知问题**，供后续按需取用。
 > 当前进度快照见下方「一、当前状态」；环境与流程约定见 [AGENTS.md](../AGENTS.md)。
 >
-> 最后更新：2026-09-19（修复翻页模式下的滚轮翻页）
+> 最后更新：2026-09-20（修复 Android 启动连 localhost:1420）
 
 ---
 
@@ -61,7 +61,7 @@
 > 事件延迟送达越过了 250ms 冷却）。此后 14 轮冷启动压测未复现，按「不引入不必要复杂度」
 > 暂不加码；若日后重现，可改用 `e.timeStamp`（事件产生时刻）而非 `Date.now()` 计时冷却。
 
-### 2.2 🆕【待处理 · 最优先】Android 装上后启动即报 `Failed to request http://localhost:1420/`
+### 2.2 ✅ 已修复：Android 装上后启动即报 `Failed to request http://localhost:1420/`
 
 **现象**：签名后的 APK 已经能正常安装了，但一启动就只显示：
 
@@ -96,20 +96,33 @@ Failed to request http://localhost:1420/: error sending request for url (http://
   佐证：`target/aarch64-linux-android/release/build/` 下同时存在
   `cargo:dev=true` 与 `cargo:dev=false` 两个 tauri 构建目录。
 
-**候选修复（动手时先验证再改）**：
+**实际修复（2026-09-20）**：按候选方案 1 + 2 落地，共改两处。
 
-1. 给 `src-tauri/Cargo.toml` 补上官方模板的 features 段：
+1. `src-tauri/Cargo.toml` 补上官方模板的 features 段：
    ```toml
    [features]
-   # 生产构建必须开，否则会编译成开发模式、不内嵌前端资源
    custom-protocol = ["tauri/custom-protocol"]
    ```
-2. 让 `src-tauri/tauri.js` 在 `release` 时把该特性传给 cargo
-   （`--features custom-protocol` 与 `--features tauri/custom-protocol` 二选一，实测确认）。
-3. **重新出包后必须复核**（别只看构建成功）：
-   从 APK 里解出 `lib/arm64-v8a/libinkwell_lib.so`，确认其中**能搜到 `index-*.js`**。
+2. `src-tauri/tauri.js` 在 `--release` 时追加 `--features custom-protocol`。
+   debug 不加：`pnpm tauri android dev --host` 走的正是这个 shim 的 debug 分支，
+   那条路要连宿主机的 devUrl（官方 CLI 会把它改写成局域网 IP），内嵌资源反而会坏事。
+
+**复核结果**（从 APK 内解出 `lib/arm64-v8a/libinkwell_lib.so` 再搜字符串）：
+
+| 产物 | 内含 `index-*.js` | 结论 |
+| --- | --- | --- |
+| 修复前（0.1.0 首次发布的那份 arm64 包） | **无** | 开发模式产物，启动即连 localhost:1420 |
+| 修复后 `apk/arm64/release/app-arm64-release.apk` | `index-zQoNuFaf.js` | 前端资源已内嵌 |
+
+> ⚠️ **判据只能是 `index-*.js`，不能拿 `localhost:1420` 当判据**。
+> devUrl 是配置数据，修复前后都会被编进二进制，用它会得出完全相反的结论。
+
+这条校验已经固化进 `personal/scripts/build-android.ps1`：出包后自动从每个 APK 里
+解出 `.so` 搜 `index-*.js`，搜不到直接 `exit 1`——和签名校验一样是硬性的，
+不会再悄悄放行开发模式产物。
 
 **验收标准**：APK 装上后直接打开书库，不需要任何本地服务在跑。
+（需你在真机上确认：本机没有安卓设备，只能验证到「资源确实内嵌」这一层。）
 
 ---
 
@@ -117,7 +130,7 @@ Failed to request http://localhost:1420/: error sending request for url (http://
 
 | 项 | 说明 |
 | --- | --- |
-| Android 真机 | ✅ 0.1.0 签名包**已能安装**（本项已验证）；但启动报错，见 §2.2 |
+| Android 真机 | 0.1.0 签名包**能装**；启动报错已修（§2.2），**待你在真机上验收** |
 | `pnpm tauri dev` 热更新 | 一直走的 release 构建，开发模式的热更新流程未实测 |
 | 大书库性能 | 目前书本数量很少。书多了之后封面网格需要虚拟滚动 |
 

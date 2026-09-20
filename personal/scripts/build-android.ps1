@@ -181,6 +181,31 @@ if ($apksigner -and (Test-Path $apksigner)) {
     Write-Info '未找到 apksigner，跳过签名校验'
 }
 
+# ---- 内嵌资源校验（硬性）----
+# 若二进制是在开发模式下编译的，就不会内嵌前端资源，而是去连 devUrl，
+# 手机上表现为一启动就报 'Failed to request http://localhost:1420/'。
+# 判据：产物 .so 里能搜到 dist 下的 index-*.js 文件名。
+# 注意不能拿 'localhost:1420' 当判据 —— devUrl 字符串始终会编进二进制里。
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$noAssets = @()
+foreach ($a in $apks) {
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($a.FullName)
+    try {
+        $so = $zip.Entries | Where-Object { $_.FullName -like 'lib/*/libinkwell_lib.so' } | Select-Object -First 1
+        if (-not $so) { $noAssets += ($a.Name + '（包内没有 .so）'); continue }
+        $ms = New-Object System.IO.MemoryStream
+        $st = $so.Open(); $st.CopyTo($ms); $st.Close()
+        $txt = [System.Text.Encoding]::ASCII.GetString($ms.ToArray())
+        if (-not [regex]::IsMatch($txt, 'index-[A-Za-z0-9_\-]{6,12}\.js')) { $noAssets += $a.Name }
+    } finally { $zip.Dispose() }
+}
+if ($noAssets.Count -gt 0) {
+    Write-Bad ('以下 APK 未内嵌前端资源（开发模式产物，装上会连 localhost:1420）：' + ($noAssets -join '、'))
+    Write-Info '检查 src-tauri/Cargo.toml 的 custom-protocol 特性、src-tauri/tauri.js 的 --features 传参'
+    exit 1
+}
+Write-Ok ('内嵌资源校验通过（' + $apks.Count + ' 个 APK）')
+
 Write-Ok ('出包成功，共 ' + $apks.Count + ' 个 APK')
 Write-Host ''
 foreach ($a in ($apks | Sort-Object Length)) {
