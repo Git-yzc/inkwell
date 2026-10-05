@@ -16,6 +16,15 @@ export interface ReaderLocation {
   sectionTotal: number;
   /** 当前章节标题，取不到则为 null */
   chapterLabel: string | null;
+  /**
+   * 位置指示用的「当前 / 总数」（REQ-2026-10-05-02）。
+   *
+   * 普通书籍取内核折算的**全书位置**（Kindle 式，见 progress.js 的 sizePerLoc）；
+   * 固定版式（PDF / 漫画）一页就是一节，改用**页码**更直观。
+   * 内核给不出时 total 为 0，UI 只显示百分比。
+   */
+  positionCurrent: number;
+  positionTotal: number;
   /** 全书剩余阅读时间（秒），内核估算不出时为 null */
   remainingSeconds: number | null;
 }
@@ -33,6 +42,8 @@ export interface TocItem {
 export interface BookInfo {
   /** 内核解析出的书名（可能为空，UI 应优先用书库里的标题） */
   title: string | null;
+  /** 内核解析出的作者（EPUB 取 dc:creator，PDF 取元数据），可能为空 */
+  author: string | null;
   /** 语言标签，用于判断是否需要 CJK 排版处理 */
   language: string | null;
   toc: TocItem[];
@@ -66,7 +77,7 @@ export interface RendererSettings {
 
 export const DEFAULT_SETTINGS: RendererSettings = {
   fontSize: 18,
-  lineHeight: 1.75,
+  lineHeight: 1.5,
   margin: 40,
   fontFamily: '',
   theme: 'light',

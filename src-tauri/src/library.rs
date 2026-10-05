@@ -307,6 +307,35 @@ pub fn update_progress(conn: &Connection, id: &str, cfi: Option<&str>, pct: f64)
     Ok(())
 }
 
+/// 回写封面缩略图（PDF 首次打开时由前端渲染第 1 页生成），返回封面相对文件名。
+///
+/// 收到的是前端已经缩到 480px 的 JPEG，但仍走一遍 `make_thumbnail`：
+/// 尺寸与质量由这里统一保证（与导入 EPUB 时同一条路径），失败则原样落盘。
+pub fn update_cover(
+    conn: &Connection,
+    covers_dir: &Path,
+    id: &str,
+    image: &[u8],
+) -> Result<String> {
+    if image.is_empty() {
+        return Err(Error::Other("封面内容为空".into()));
+    }
+    if get(conn, id)?.is_none() {
+        return Err(Error::Other("这本书不在书库里".into()));
+    }
+
+    let (data, ext) = make_thumbnail(image).unwrap_or_else(|| (image.to_vec(), "jpg"));
+    std::fs::create_dir_all(covers_dir)?;
+    let name = format!("{id}.{ext}");
+    std::fs::write(covers_dir.join(&name), &data)?;
+
+    conn.execute(
+        "UPDATE books SET cover_path = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id, name, now_secs()],
+    )?;
+    Ok(name)
+}
+
 /// 仅更新「最近打开时间」（打开书时调用，不改动进度）。
 pub fn touch(conn: &Connection, id: &str) -> Result<()> {
     conn.execute(
@@ -365,6 +394,44 @@ mod tests {
 
         update_progress(&conn, "a", None, 1.0).unwrap();
         assert!(get(&conn, "a").unwrap().unwrap().finished);
+    }
+
+    /// 封面回写（PDF 首次打开时前端渲第 1 页生成）：要落盘成缩略图并更新记录。
+    #[test]
+    fn cover_writeback_writes_thumbnail_and_updates_row() {
+        let conn = mem_db();
+        conn.execute(
+            "INSERT INTO books (id,title,format,file_path,added_at,updated_at)
+             VALUES ('a','书名','pdf','a.pdf',0,0)",
+            [],
+        )
+        .unwrap();
+
+        let tmp = std::env::temp_dir().join("inkwell-cover-test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        // 用 image 现生成一张小 PNG，免得硬编码字节数组
+        let img = image::RgbImage::from_pixel(16, 16, image::Rgb([200, 40, 40]));
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgb8(img)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+
+        let name = update_cover(&conn, &tmp, "a", &png).expect("回写封面失败");
+        assert_eq!(name, "a.jpg", "缩略图应统一转成 JPEG");
+        assert!(tmp.join(&name).is_file(), "封面文件应已落盘");
+        assert_eq!(
+            get(&conn, "a").unwrap().unwrap().cover_path.as_deref(),
+            Some("a.jpg"),
+            "书籍记录应指向新封面"
+        );
+
+        // 空内容与不存在的书都要明确报错，而不是写出一个空文件
+        assert!(update_cover(&conn, &tmp, "a", &[]).is_err());
+        assert!(update_cover(&conn, &tmp, "missing", &png).is_err());
+
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// 完整导入链路的端到端验证：拷贝文件、解析元数据、生成封面、去重、入库。

@@ -1,6 +1,7 @@
 import { save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import AppThemeToggle from '@/components/AppThemeToggle';
 import AnnotationEditor, { type EditorTarget } from '@/features/annotation/AnnotationEditor';
 import AnnotationPanel from '@/features/annotation/AnnotationPanel';
 import { ReaderEngine } from '@/features/reader/engine';
@@ -21,11 +22,15 @@ import {
   type HighlightColor,
   readableError,
 } from '@/lib/api';
-import { formatPercent } from '@/lib/util';
+import { toJpegBytes } from '@/lib/image';
+import { formatPercent, isAndroid } from '@/lib/util';
 import { useReaderSettings } from '@/store/reader-settings';
 
 /** 进度写库的节流间隔：翻页很频繁，没必要每页都打一次数据库。 */
 const PROGRESS_SAVE_MS = 1200;
+
+/** 工具栏无操作多久后自动隐藏（毫秒）。 */
+const BAR_HIDE_MS = 4000;
 
 export default function Reader() {
   const { id } = useParams<{ id: string }>();
@@ -53,7 +58,20 @@ export default function Reader() {
   const [showAnnotations, setShowAnnotations] = useState(false);
   const [fraction, setFraction] = useState(0);
   const [chapter, setChapter] = useState<string | null>(null);
+  /** 右下角常驻位置指示（REQ-2026-10-05-02）。total 为 0 表示内核没给，只显示百分比 */
+  const [position, setPosition] = useState<{ current: number; total: number }>({
+    current: 0,
+    total: 0,
+  });
   const [barVisible, setBarVisible] = useState(true);
+  /**
+   * 隐藏态屏蔽层是否处于「本次手势还没结束」的保持期（REQ-2026-10-05-03 方案 B）。
+   *
+   * 只靠 opacity 显隐不够：React 对 pointerdown 是**同步**刷新的，工具栏会在同一次手势里
+   * 立刻变成可交互，紧随其后的 mousedown / click 就会落到刚出现的进度条上。
+   * 所以按下后屏蔽层要多留一会儿，把整个手势吞完，下一次点按才落到真实控件。
+   */
+  const [shieldHeld, setShieldHeld] = useState(false);
 
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   /**
@@ -74,6 +92,8 @@ export default function Reader() {
   const [toast, setToast] = useState<string | null>(null);
 
   const theme = THEMES[settings.theme];
+  /** PDF 本次不做批注（Q11），书签入口与 CFI 记录都要绕开 */
+  const isPdf = book?.format === 'pdf';
 
   /**
    * 最近一次 relocate 的结果。
@@ -93,6 +113,13 @@ export default function Reader() {
 
   /** 下拉手势触发时调用的「最新版 toggleBookmark」，赋值见下面 */
   const toggleBookmarkRef = useRef<() => Promise<void>>(async () => {});
+  /** 双击工具栏时调用的「最新版 toggleBars」（引擎的回调只注册一次） */
+  const toggleBarsRef = useRef<() => void>(() => {});
+  /** 工具栏可见性的镜像：切换时要读「当前值」，不能在 setState 的更新函数里做副作用 */
+  const barVisibleRef = useRef(true);
+  barVisibleRef.current = barVisible;
+  /** 自动隐藏计时器：工具栏显隐都从这里统一改，避免多份计时器互相打架 */
+  const barTimerRef = useRef<number | undefined>(undefined);
 
   const lastLocRef = useRef<{ cfi: string | null; chapter: string | null }>({
     cfi: null,
@@ -141,20 +168,25 @@ export default function Reader() {
     engineRef.current = engine;
 
     let saveTimer: number | undefined;
-    let lastSavedCfi: string | null = null;
+    /** 上次落库的位置指纹：EPUB 用 CFI，PDF 没有 CFI 就用进度的千分位 */
+    let lastSavedKey = '';
+    const pdf = book.format === 'pdf';
 
     const offRelocate = engine.onRelocate((loc) => {
       setFraction(loc.fraction);
       setChapter(loc.chapterLabel);
       setCurrentCfi(loc.cfi);
+      setPosition({ current: loc.positionCurrent, total: loc.positionTotal });
       lastLocRef.current = { cfi: loc.cfi, chapter: loc.chapterLabel };
 
-      // 节流写库：位置变化先攒着，停止翻页一会儿后再落库
-      if (loc.cfi !== null && loc.cfi !== lastSavedCfi) {
+      // 节流写库：位置变化先攒着，停止翻页一会儿后再落库。
+      // PDF 没有可用 CFI（内核的 resolveCFI 未实现），位置只记进度百分比。
+      const cfi = pdf ? null : loc.cfi;
+      const key = pdf ? String(Math.round(loc.fraction * 1000)) : (loc.cfi ?? '');
+      if (key !== lastSavedKey) {
         window.clearTimeout(saveTimer);
-        const cfi = loc.cfi;
         saveTimer = window.setTimeout(() => {
-          lastSavedCfi = cfi;
+          lastSavedKey = key;
           void api.saveProgress(book.id, cfi, loc.fraction).catch(() => {
             // 进度保存失败不打断阅读，下次翻页会再试
           });
@@ -184,9 +216,19 @@ export default function Reader() {
       void toggleBookmarkRef.current();
     });
 
+    // 双击正文中间区域切换上下工具栏（REQ-2026-10-05-01）。
+    // 只在 Android 注册：Windows 桌面端这次不做这条（Q2）。
+    const offToggleBars = isAndroid()
+      ? engine.onToggleBars(() => toggleBarsRef.current())
+      : () => {};
+
     (async () => {
       try {
-        const bookInfo = await engine.open(book.absPath, { lastLocation: book.progressCfi });
+        const bookInfo = await engine.open(book.absPath, {
+          lastLocation: book.progressCfi,
+          // PDF 没有 CFI，靠进度比例落回页码
+          lastFraction: book.progressPct,
+        });
         if (disposed) return;
         setInfo(bookInfo);
         setLoading(false);
@@ -206,6 +248,7 @@ export default function Reader() {
       offAnnotationClick();
       offPullProgress();
       offPullTrigger();
+      offToggleBars();
       engine.close();
       engineRef.current = null;
     };
@@ -249,6 +292,42 @@ export default function Reader() {
     engineRef.current?.applySettings(settings);
   }, [settings]);
 
+  /**
+   * PDF 首次打开：渲第 1 页生成封面，并把 PDF 自带的标题 / 作者回写书库
+   * （REQ-2026-10-05-04 的 Q9 / Q10）。
+   *
+   * 只在「书库里还没有封面」时做一次：做完 coverPath 就有值了，不会重复跑。
+   * 任何一步失败都只写控制台 —— 回写封面不该挡住读书。
+   */
+  useEffect(() => {
+    if (!book || !info || book.format !== 'pdf' || book.coverPath !== null) return;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const blob = await engineRef.current?.getCoverBlob();
+        if (cancelled) return;
+        const cover = blob ? await toJpegBytes(blob) : [];
+        if (cancelled) return;
+
+        const title = info.title?.trim() || null;
+        const author = info.author?.trim() || null;
+        // 拿不到 PDF 自己的标题就继续用文件名，别把已有标题清掉
+        if (title !== null) await api.renameBook(book.id, title, author);
+        if (cover.length > 0) await api.saveBookCover(book.id, cover);
+
+        const fresh = await api.getBook(book.id);
+        if (!cancelled && fresh) setBook(fresh);
+      } catch (e) {
+        console.error('PDF 封面与元数据回写失败', e);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [book, info]);
+
   // ---- 键盘翻页 ----
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -290,27 +369,77 @@ export default function Reader() {
    * 「显示 + 重新计时」。这样不必用额外的状态去触发 effect 重跑，
    * 逻辑也更贴近它想表达的意思。
    */
+  const bump = useCallback(() => {
+    setBarVisible(true);
+    window.clearTimeout(barTimerRef.current);
+    barTimerRef.current = window.setTimeout(() => setBarVisible(false), BAR_HIDE_MS);
+  }, []);
+
+  /**
+   * 显示 / 隐藏切换（双击正文中间区域触发，REQ-2026-10-05-01）。
+   * 切到显示时同样开始计时，之后照旧自动隐藏。
+   */
+  const toggleBars = useCallback(() => {
+    window.clearTimeout(barTimerRef.current);
+    const next = !barVisibleRef.current;
+    setBarVisible(next);
+    if (next) barTimerRef.current = window.setTimeout(() => setBarVisible(false), BAR_HIDE_MS);
+  }, []);
+  toggleBarsRef.current = toggleBars;
+
   useEffect(() => {
-    let timer: number | undefined;
-
-    const bump = () => {
-      setBarVisible(true);
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => setBarVisible(false), 4000);
-    };
-
     bump(); // 刚进入时也启动计时
 
     window.addEventListener('pointermove', bump);
     window.addEventListener('pointerdown', bump);
     window.addEventListener('keydown', bump);
     return () => {
-      window.clearTimeout(timer);
+      window.clearTimeout(barTimerRef.current);
       window.removeEventListener('pointermove', bump);
       window.removeEventListener('pointerdown', bump);
       window.removeEventListener('keydown', bump);
     };
-  }, []);
+  }, [bump]);
+
+  /**
+   * 隐藏态屏蔽层的按下：这一整只手势被吞掉，只负责把工具栏叫出来。
+   *
+   * 必须 stopPropagation —— 否则 window 上的 pointerdown 仍会 bump()，
+   * 「吞掉手势」就白吞了（REQ-2026-10-05-03）。
+   * preventDefault 则让触摸不再派发兼容鼠标事件，先断掉「同一手势二次命中」。
+   */
+  function handleShieldDown(e: React.PointerEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    setShieldHeld(true);
+    bump();
+  }
+
+  /**
+   * ⚠️ 屏蔽层不能一到 pointerup 就撤掉。
+   *
+   * click 是在 pointerup **之后**才派发的，那会儿工具栏已经显示、真实控件也恢复了
+   * pointer-events，click 就会落到「设置」这类按钮上。实测就是这么翻的车：
+   * 隐藏态点顶栏「设置」所在的位置 → 工具栏出来了，设置面板也被一起点开了。
+   * 所以要让它留到 click 被自己吞掉为止；拖拽这类不产生 click 的手势用定时器兜底，
+   * 免得屏蔽层卡住不走。
+   */
+  function handleShieldClick(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    releaseShield();
+  }
+
+  function scheduleShieldRelease() {
+    window.setTimeout(releaseShield, 400);
+  }
+
+  function releaseShield() {
+    setShieldHeld(false);
+  }
+
+  /** 屏蔽层在「工具栏隐藏」或「本次手势还没结束」时存在 */
+  const shieldActive = !barVisible || shieldHeld;
 
   const toc = useMemo(() => info?.toc ?? [], [info]);
 
@@ -404,6 +533,8 @@ export default function Reader() {
   /** 加/去当前页的书签。 */
   async function toggleBookmark() {
     if (!book) return;
+    // PDF 本次不做批注，也没有可用的 CFI（Q11）
+    if (book.format === 'pdf') return;
     const { cfi, chapter: ch } = lastLocRef.current;
     if (!cfi) return;
 
@@ -468,48 +599,43 @@ export default function Reader() {
 
   return (
     <div
-      className="flex h-screen flex-col overflow-hidden"
+      className="relative flex h-screen flex-col overflow-hidden"
       style={{ background: theme.bg, color: theme.fg }}
     >
-      {/* 顶栏 */}
+      {/* 顶栏。配色跟 **App 主题**（Q17），阅读主题只管正文页面 */}
       <header
-        className="z-20 flex shrink-0 items-center gap-3 border-b px-4 transition-opacity duration-300"
+        className="z-20 flex shrink-0 items-center gap-3 border-b border-app-border bg-app-surface px-4 text-app-muted transition-opacity duration-300"
         style={{
           height: 48,
-          borderColor: `${theme.muted}33`,
           opacity: barVisible ? 1 : 0,
           pointerEvents: barVisible ? 'auto' : 'none',
-          background: theme.bg,
         }}
       >
         <button
           type="button"
           onClick={() => navigate('/')}
-          className="cursor-pointer rounded px-2 py-1 text-sm hover:bg-black/5"
-          style={{ color: theme.muted }}
+          className="cursor-pointer rounded px-2 py-1 text-sm hover:bg-app-hover"
         >
           ← 书库
         </button>
 
-        <div className="min-w-0 flex-1 truncate text-sm">
+        <div className="min-w-0 flex-1 truncate text-sm text-app-fg">
           {book?.title ?? ''}
-          {chapter !== null && (
-            <span className="ml-2 text-xs" style={{ color: theme.muted }}>
-              {chapter}
-            </span>
-          )}
+          {chapter !== null && <span className="ml-2 text-xs text-app-muted">{chapter}</span>}
         </div>
 
-        <button
-          type="button"
-          onClick={() => void toggleBookmark()}
-          aria-label={bookmarkHere ? '去掉书签' : '加书签'}
-          title={bookmarkHere ? '去掉书签' : '加书签'}
-          className="cursor-pointer rounded px-2 py-1 text-sm hover:bg-black/5"
-          style={{ color: bookmarkHere ? '#e0b64a' : theme.muted }}
-        >
-          {bookmarkHere ? '★' : '☆'}
-        </button>
+        {/* PDF 本次不做批注，书签按钮直接不出现（Q11：宁可没有，也别「能点但没反应」） */}
+        {!isPdf && (
+          <button
+            type="button"
+            onClick={() => void toggleBookmark()}
+            aria-label={bookmarkHere ? '去掉书签' : '加书签'}
+            title={bookmarkHere ? '去掉书签' : '加书签'}
+            className={`cursor-pointer rounded px-2 py-1 text-sm hover:bg-app-hover ${bookmarkHere ? 'text-amber-500' : ''}`}
+          >
+            {bookmarkHere ? '★' : '☆'}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => {
@@ -517,8 +643,7 @@ export default function Reader() {
             setShowSettings(false);
             setShowAnnotations(false);
           }}
-          className="cursor-pointer rounded px-2 py-1 text-sm hover:bg-black/5"
-          style={{ color: theme.muted }}
+          className="cursor-pointer rounded px-2 py-1 text-sm hover:bg-app-hover"
         >
           目录
         </button>
@@ -529,8 +654,7 @@ export default function Reader() {
             setShowToc(false);
             setShowSettings(false);
           }}
-          className="cursor-pointer rounded px-2 py-1 text-sm hover:bg-black/5"
-          style={{ color: showAnnotations ? '#e0b64a' : theme.muted }}
+          className={`cursor-pointer rounded px-2 py-1 text-sm hover:bg-app-hover ${showAnnotations ? 'text-app-accent' : ''}`}
         >
           批注{annotations.length > 0 ? ` ${annotations.length}` : ''}
         </button>
@@ -541,11 +665,11 @@ export default function Reader() {
             setShowToc(false);
             setShowAnnotations(false);
           }}
-          className="cursor-pointer rounded px-2 py-1 text-sm hover:bg-black/5"
-          style={{ color: theme.muted }}
+          className="cursor-pointer rounded px-2 py-1 text-sm hover:bg-app-hover"
         >
           设置
         </button>
+        <AppThemeToggle compact />
       </header>
 
       {/* 正文区 */}
@@ -609,6 +733,57 @@ export default function Reader() {
         )}
       </div>
 
+      {/* 右下角常驻位置指示（REQ-2026-10-05-02）。
+          刻意设为不接收指针事件：它压在右下角，否则会挡住翻页点按区。
+          底栏显示时上移让位，隐藏时贴近屏幕底部（用户截图里的位置）。
+
+          ⚠️ 批注操作栏打开时必须**不显示**：那条栏也是贴着屏幕底部的，
+          而角标是绝对定位（z-[15]，比在正常流里的操作栏还高一层），
+          叠上去就会压在「笔记」按钮上（真机截图就是这么暴露的）。
+          这时底栏的进度条与百分比仍然可见，不差这一个角标。 */}
+      {!loading && error === null && editor === null && (
+        <div
+          className="pointer-events-none absolute right-3 z-[15] text-right text-xs tabular-nums transition-all duration-300"
+          style={{ bottom: barVisible ? 52 : 10, color: theme.muted }}
+        >
+          {position.total > 0 && (
+            <span>
+              {position.current} / {position.total}
+            </span>
+          )}
+          <span className={position.total > 0 ? 'ml-2' : undefined}>{formatPercent(fraction)}</span>
+        </div>
+      )}
+
+      {/* 隐藏态屏蔽层（REQ-2026-10-05-03 方案 B）。
+          工具栏隐藏时盖在顶栏 / 底栏之上：按下先被它整只吞掉、只负责把工具栏叫出来，
+          这样同一次手势的 mousedown / click 不会再落到刚显示出来的进度条或按钮上。
+          z-[25]：压得住工具栏（z-20），又低于侧栏面板（z-30），不会挡住面板操作。 */}
+      {shieldActive && (
+        <>
+          <div
+            aria-hidden="true"
+            onPointerDown={handleShieldDown}
+            onPointerUp={scheduleShieldRelease}
+            onPointerCancel={scheduleShieldRelease}
+            onLostPointerCapture={scheduleShieldRelease}
+            onClick={handleShieldClick}
+            className="absolute inset-x-0 top-0 z-[25]"
+            style={{ height: 48 }}
+          />
+          <div
+            aria-hidden="true"
+            onPointerDown={handleShieldDown}
+            onPointerUp={scheduleShieldRelease}
+            onPointerCancel={scheduleShieldRelease}
+            onLostPointerCapture={scheduleShieldRelease}
+            onClick={handleShieldClick}
+            className="absolute inset-x-0 bottom-0 z-[25]"
+            style={{ height: 44 }}
+          />
+        </>
+      )}
+
       {/* 批注操作栏。
           刻意放在底部而不是浮在选区旁边 —— Android 选中文字会先弹系统自己的
           「复制 / 粘贴 / 网络搜索」原生浮层，它永远贴着选区、且画在 WebView 之上，
@@ -616,7 +791,6 @@ export default function Reader() {
       {editor !== null && (
         <AnnotationEditor
           target={editor}
-          theme={settings.theme}
           busy={annotationBusy}
           onSave={(patch) => void handleEditorSave(patch)}
           onDelete={
@@ -633,12 +807,11 @@ export default function Reader() {
 
       {/* 底栏进度 */}
       <footer
-        className="z-20 flex shrink-0 items-center gap-3 px-4 transition-opacity duration-300"
+        className="z-20 flex shrink-0 items-center gap-3 border-t border-app-border bg-app-surface px-4 transition-opacity duration-300"
         style={{
           height: 44,
           opacity: barVisible ? 1 : 0,
           pointerEvents: barVisible ? 'auto' : 'none',
-          background: theme.bg,
         }}
       >
         <input
@@ -653,7 +826,7 @@ export default function Reader() {
           }}
           className="flex-1 cursor-pointer accent-amber-500"
         />
-        <span className="w-12 text-right text-xs tabular-nums" style={{ color: theme.muted }}>
+        <span className="w-12 text-right text-xs tabular-nums text-app-muted">
           {formatPercent(fraction)}
         </span>
       </footer>

@@ -78,6 +78,14 @@ export const api = {
     invoke<void>('save_progress', { id, cfi, pct }),
   renameBook: (id: string, title: string, author: string | null) =>
     invoke<void>('rename_book', { id, title, author }),
+  /**
+   * 回写封面缩略图（PDF 首次打开时渲染第 1 页生成）。
+   *
+   * `cover` 是已经缩到 480px 的 JPEG 字节。走 JSON 数组传字节确实不精致，
+   * 但它是**一次性**的、只有几十 KB，比为一个内嵌 Tauri 原始请求体 API 引入不确定性划算。
+   * 返回封面相对文件名。
+   */
+  saveBookCover: (id: string, cover: number[]) => invoke<string>('save_book_cover', { id, cover }),
 
   listAnnotations: (bookId: string) => invoke<Annotation[]>('list_annotations', { bookId }),
   addAnnotation: (input: {

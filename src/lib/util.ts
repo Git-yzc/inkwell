@@ -26,6 +26,16 @@ export function formatRelative(unixSecs: number | null): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+/**
+ * 是否运行在 Android 上。
+ *
+ * 用来把「双击正文呼出工具栏」这类**只给手机**的交互限在 Android
+ * （REQ-2026-10-05 的 Q2）。Android WebView 的 UA 一定含 Android，可靠。
+ */
+export function isAndroid(): boolean {
+  return /Android/i.test(navigator.userAgent);
+}
+
 /** 0.42 -> "42%" */
 export function formatPercent(pct: number): string {
   return `${Math.round(Math.min(1, Math.max(0, pct)) * 100)}%`;

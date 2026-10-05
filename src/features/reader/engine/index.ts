@@ -34,8 +34,15 @@ import {
 
 /** 打开书籍时的可选项。 */
 export interface OpenOptions {
-  /** 上次读到的 CFI，用于恢复位置 */
+  /** 上次读到的 CFI，用于恢复位置（PDF 没有 CFI，固定为 null） */
   lastLocation?: string | null;
+  /**
+   * 上次读到的进度 0..1。
+   *
+   * PDF 没有可用的 CFI，只能靠它落回页码 —— 内核的 `sections` 一页一节、
+   * 每节 size 相同，所以 `goToFraction` 能精确落到那一页。
+   */
+  lastFraction?: number | null;
 }
 
 type RelocateListener = (loc: ReaderLocation) => void;
@@ -51,6 +58,8 @@ type AnnotationClickListener = (cfi: string) => void;
 type PullProgressListener = (armed: boolean | null) => void;
 /** 下拉到触发线后松手。 */
 type PullTriggerListener = () => void;
+/** 正文中间区域被双击（Android 上用来切换上下工具栏，见 REQ-2026-10-05-01）。 */
+type ToggleBarsListener = () => void;
 
 /** foliate 画批注时交回来的东西（见 view.js 的 addAnnotation）。 */
 interface DrawAnnotationDetail {
@@ -67,6 +76,13 @@ const PULL_HINT_PX = 36;
 const PULL_TRIGGER_PX = 96;
 /** 竖直位移至少是水平位移的多少倍才算「下拉」而不是横向滑动。 */
 const PULL_VERTICAL_RATIO = 1.6;
+
+/** 双击判定的最大间隔（毫秒）：超过它两次点按各自独立。 */
+const DOUBLE_TAP_MS = 320;
+/** 双击允许的最大位移（像素）：手指落点总会飘一点，给个容差。 */
+const DOUBLE_TAP_SLOP = 32;
+/** 双击清掉选区后，多久之内忽略选区回调（免得顺手弹出批注操作栏）。 */
+const DOUBLE_TAP_SELECTION_MUTE_MS = 600;
 
 /** 滚轮累积多少像素才翻一页。 */
 const WHEEL_STEP = 50;
@@ -121,14 +137,30 @@ function normalizeToc(items: FoliateTocItem[] | undefined, prefix = ''): TocItem
   });
 }
 
-function toLocation(raw: FoliateLocation | null, fallbackSectionTotal: number): ReaderLocation {
+/**
+ * 内核位置 → 我们自己的位置对象。
+ *
+ * `usePages` 为 true 时（固定版式：PDF / 漫画）一页就是一节，直接用页码；
+ * 否则用内核按 `sizePerLoc` 折算出的全书位置（Kindle 式）。
+ */
+function toLocation(
+  raw: FoliateLocation | null,
+  fallbackSectionTotal: number,
+  usePages: boolean,
+): ReaderLocation {
   const label = raw?.tocItem?.label;
+  const section = raw?.section;
+  const current = usePages ? (section?.current ?? 0) + 1 : (raw?.location?.current ?? 0);
+  const total = usePages ? (section?.total ?? fallbackSectionTotal) : (raw?.location?.total ?? 0);
+
   return {
     cfi: raw?.cfi ?? null,
     fraction: typeof raw?.fraction === 'number' ? raw.fraction : 0,
-    sectionIndex: raw?.section?.current ?? 0,
-    sectionTotal: raw?.section?.total ?? fallbackSectionTotal,
+    sectionIndex: section?.current ?? 0,
+    sectionTotal: section?.total ?? fallbackSectionTotal,
     chapterLabel: typeof label === 'string' && label.trim() ? label.trim() : null,
+    positionCurrent: current,
+    positionTotal: total,
     remainingSeconds: typeof raw?.time?.total === 'number' ? raw.time.total : null,
   };
 }
@@ -229,6 +261,16 @@ export class ReaderEngine {
   #annotationClickListeners = new Set<AnnotationClickListener>();
   #pullProgressListeners = new Set<PullProgressListener>();
   #pullTriggerListeners = new Set<PullTriggerListener>();
+  #toggleBarsListeners = new Set<ToggleBarsListener>();
+  /** 固定版式（PDF / 漫画）：不套文字排版、不绑划词与下拉手势 */
+  #fixedLayout = false;
+  /** 已挂上双击监听的书籍文档（换章节会换文档，按文档去重） */
+  #tapDoc: Document | null = null;
+  #lastTap: { t: number; x: number; y: number } | null = null;
+  /** 第一次点按时是否已有选区：有的话说明用户在划词，双击不响应（Q3） */
+  #tapHadSelection = false;
+  /** 在这个时刻之前忽略选区回调（双击清选区的余波） */
+  #muteSelectionUntil = 0;
   #pullDoc: Document | null = null;
   #pullStart: { x: number; y: number } | null = null;
   #pullPhase: 'idle' | 'pulling' | 'armed' = 'idle';
@@ -258,17 +300,25 @@ export class ReaderEngine {
 
     this.#view.addEventListener('relocate', (e) => {
       const detail = (e as CustomEvent<FoliateLocation | null>).detail ?? null;
-      const loc = toLocation(detail, this.#sectionCount);
+      const loc = toLocation(detail, this.#sectionCount, this.#fixedLayout);
       for (const fn of this.#relocateListeners) fn(loc);
     });
 
     this.#view.addEventListener('load', (e) => {
       const detail = (e as CustomEvent<{ doc?: Document; index: number }>).detail;
+      // view.open() 在渲染之前就把 isFixedLayout 置好了，这里跟着同步，
+      // 保证第一次 relocate 就用对位置口径。
+      this.#fixedLayout = this.#view.isFixedLayout === true;
       // 换章节时内核会重建 iframe 文档，样式、滚轮与选区监听都要重新挂
       this.#applyRendererAttributes();
       this.#bindWheel(detail?.doc);
-      this.#bindSelection(detail?.doc);
-      this.#bindPullDown(detail?.doc);
+      this.#bindDoubleTap(detail?.doc);
+      // 固定版式（PDF）本次不做批注：不绑划词与下拉手势，
+      // 免得上层弹出注定存不下的批注操作栏（REQ-2026-10-05-04 Q11）。
+      if (!this.#fixedLayout) {
+        this.#bindSelection(detail?.doc);
+        this.#bindPullDown(detail?.doc);
+      }
       this.#sectionIndex = detail?.index ?? 0;
       for (const fn of this.#loadListeners) fn({ index: detail?.index ?? 0 });
     });
@@ -309,9 +359,22 @@ export class ReaderEngine {
     const book = this.#view.book;
     const toc = normalizeToc(book?.toc);
     this.#sectionCount = book?.sections?.length ?? 0;
+    this.#fixedLayout = book?.rendition?.layout === 'pre-paginated';
 
-    const last = opts.lastLocation ?? null;
+    // 固定版式没有可用的 CFI（PDF 的 resolveCFI 根本没实现），
+    // 传进去只会让内核走 CFI.parse 那条异常路径，所以一律不传。
+    const last = this.#fixedLayout ? null : (opts.lastLocation ?? null);
     await this.#view.init({ lastLocation: last, showTextStart: !last });
+
+    // PDF 等固定版式靠进度比例落回页码（一页一节，比例即页码）。
+    // ⚠️ 必须先确认内核建了 sectionProgress：它就建在 splitTOCHref / getTOCFragment 都存在时
+    // （见 view.js 的 open），少了它们 goToFraction 会直接抛错。
+    const lastFraction = opts.lastFraction ?? null;
+    const canLocateByFraction =
+      typeof book?.splitTOCHref === 'function' && typeof book?.getTOCFragment === 'function';
+    if (this.#fixedLayout && canLocateByFraction && lastFraction !== null && lastFraction > 0) {
+      await this.#view.goToFraction(Math.min(1, Math.max(0, lastFraction)));
+    }
 
     this.#opened = true;
     this.#applyRendererAttributes();
@@ -322,13 +385,13 @@ export class ReaderEngine {
     // #opened 置位之前。不补这一次，重开书后高亮就不会出现在正文里。
     void this.#drawHighlights();
 
-    const fixedLayout = book?.rendition?.layout === 'pre-paginated';
     return {
       title: pickText(book?.metadata?.title),
+      author: pickText(book?.metadata?.author) ?? pickText(book?.metadata?.creator),
       language: pickText(book?.metadata?.language),
       toc,
       sectionCount: this.#sectionCount,
-      fixedLayout,
+      fixedLayout: this.#fixedLayout,
     };
   }
 
@@ -341,6 +404,8 @@ export class ReaderEngine {
     this.#selectionDoc = null;
     window.clearTimeout(this.#selectionTimer);
     this.#unbindPullDown();
+    this.#unbindDoubleTap();
+    this.#muteSelectionUntil = 0;
     try {
       this.#view.close();
     } catch {
@@ -353,6 +418,7 @@ export class ReaderEngine {
     this.#annotationClickListeners.clear();
     this.#pullProgressListeners.clear();
     this.#pullTriggerListeners.clear();
+    this.#toggleBarsListeners.clear();
     this.#highlights.clear();
   }
 
@@ -383,9 +449,14 @@ export class ReaderEngine {
     }
   }
 
-  /** 清掉正文里的选区（加完批注后调用，免得浮层一直挂着）。 */
+  /** 清掉正文里的选区（加完批注、双击切换工具栏后调用，免得浮层一直挂着）。 */
   clearSelection(): void {
-    if (this.#opened) this.#view.deselect();
+    if (!this.#opened) return;
+    try {
+      this.#view.deselect();
+    } catch {
+      // 固定版式或文档已卸载时忽略：清选区失败不影响别的事
+    }
   }
 
   onSelection(fn: SelectionListener): () => void {
@@ -418,6 +489,9 @@ export class ReaderEngine {
   };
 
   #emitSelection(): void {
+    // 双击会顺带选中一个词（Android 的原生行为），刚被我们清掉，
+    // 这段时间内的选区回调一律忽略，免得弹出批注操作栏。
+    if (Date.now() < this.#muteSelectionUntil) return;
     const info = this.#currentSelection();
     for (const fn of this.#selectionListeners) fn(info);
   }
@@ -483,6 +557,22 @@ export class ReaderEngine {
     return this.#opened ? this.#view.getSectionFractions() : [];
   }
 
+  /**
+   * 取书籍第 1 页渲染出的封面图（目前只有 PDF 这类固定版式提供，见 Q9）。
+   *
+   * 只在内存里画一次，落盘与压缩由调用方决定；取不到就返回 null。
+   */
+  async getCoverBlob(): Promise<Blob | null> {
+    const getCover = this.#view.book?.getCover;
+    if (!this.#opened || typeof getCover !== 'function') return null;
+    try {
+      return await getCover.call(this.#view.book);
+    } catch (e) {
+      console.warn('渲染封面失败', e);
+      return null;
+    }
+  }
+
   /* ---------------------------------------------------------------- 设置 */
 
   applySettings(settings: RendererSettings): void {
@@ -496,7 +586,11 @@ export class ReaderEngine {
     if (!s || !renderer) return;
 
     renderer.setAttribute('flow', s.flow);
-    renderer.setAttribute('margin', String(s.margin));
+    // ⚠️ 必须带单位。内核把它原样塞进 CSS 变量 --_margin，再用于
+    // `grid-template-rows: minmax(var(--_margin), 1fr)`。裸数字不是合法长度，
+    // 那条声明会失效、整行塌掉 —— 表现为「页边距一旦不为 0，正文就缩成一小块」。
+    // 内核自己的默认值就是 48px，且 #beforeRender 是 parseFloat，带 px 不受影响。
+    renderer.setAttribute('margin', `${s.margin}px`);
     renderer.setAttribute('max-column-count', String(s.maxColumnCount));
 
     // setStyles 会把 CSS 注入书籍文档；fixed-layout（漫画）不套用文字排版
@@ -544,7 +638,8 @@ export class ReaderEngine {
    * 另外，正在选词时不触发：那时候用户拖的是选择手柄，不是下拉。
    */
   #bindPullDown(doc: Document | undefined): void {
-    if (!doc || this.#pullDoc === doc) return;
+    // 固定版式（PDF）本次不做书签，手势也就没有意义
+    if (!doc || this.#fixedLayout || this.#pullDoc === doc) return;
     this.#unbindPullDown();
     this.#pullDoc = doc;
     // 只读不拦截，所以 passive 即可（也省得拖慢滚动）
@@ -620,6 +715,78 @@ export class ReaderEngine {
     this.#setPullPhase('idle');
     if (fire) for (const fn of this.#pullTriggerListeners) fn();
   };
+
+  /* ------------------------------------------------------ 双击切换工具栏 */
+
+  /**
+   * 订阅「正文中间区域被双击」（REQ-2026-10-05-01）。
+   *
+   * 只在**触摸**双击时触发：Windows 桌面端本次不做这条（Q2）。
+   * 左右两侧 18% 的翻页点按区在**外层文档**（覆盖在 iframe 之上），
+   * 点按根本不会到达书籍文档，所以这里天然只在中间区域生效。
+   */
+  onToggleBars(fn: ToggleBarsListener): () => void {
+    this.#toggleBarsListeners.add(fn);
+    return () => this.#toggleBarsListeners.delete(fn);
+  }
+
+  /** 给书籍文档挂双击判定。换章节会换文档，用 #tapDoc 去重。 */
+  #bindDoubleTap(doc: Document | undefined): void {
+    if (!doc || this.#tapDoc === doc) return;
+    this.#unbindDoubleTap();
+    this.#tapDoc = doc;
+    // 只读不拦截：不给 passive:false，避免影响滚动与选词
+    doc.addEventListener('pointerup', this.#onTapForDoubleTap, { passive: true });
+  }
+
+  #unbindDoubleTap(): void {
+    this.#tapDoc?.removeEventListener('pointerup', this.#onTapForDoubleTap);
+    this.#tapDoc = null;
+    this.#lastTap = null;
+    this.#tapHadSelection = false;
+  }
+
+  /**
+   * 用两次 pointerup 自己拼双击，而不是用 dblclick：
+   * Android WebView 在关掉缩放后并不保证派发 dblclick，自己判定更稳。
+   *
+   * 关于选区：Android 上双击正文会顺带选中一个词（原生行为）。
+   * 若第一次点按时**已经**有选区，说明用户在划词，按 Q3 直接不响应；
+   * 否则把这次双击造成的选区清掉再切换工具栏 —— 否则会「工具栏和批注栏一起弹」。
+   */
+  #onTapForDoubleTap = (e: PointerEvent): void => {
+    // 鼠标不参与：双击呼出工具栏本次只做 Android（Q2）
+    if (e.pointerType === 'mouse') return;
+
+    const now = Date.now();
+    const last = this.#lastTap;
+    const nearby =
+      last !== null &&
+      now - last.t <= DOUBLE_TAP_MS &&
+      Math.abs(e.clientX - last.x) <= DOUBLE_TAP_SLOP &&
+      Math.abs(e.clientY - last.y) <= DOUBLE_TAP_SLOP;
+
+    if (!nearby) {
+      // 第一下：记下它以及「这时是否已在划词」
+      this.#lastTap = { t: now, x: e.clientX, y: e.clientY };
+      this.#tapHadSelection = this.#hasSelection();
+      return;
+    }
+
+    this.#lastTap = null;
+    if (this.#tapHadSelection) return; // 划词中不响应（Q3）
+
+    if (this.#hasSelection()) {
+      this.#muteSelectionUntil = now + DOUBLE_TAP_SELECTION_MUTE_MS;
+      this.clearSelection();
+    }
+    for (const fn of this.#toggleBarsListeners) fn();
+  };
+
+  #hasSelection(): boolean {
+    const sel = this.#tapDoc?.defaultView?.getSelection();
+    return !!sel && !sel.isCollapsed;
+  }
 
   /* ------------------------------------------------------------ 滚轮翻页 */
 

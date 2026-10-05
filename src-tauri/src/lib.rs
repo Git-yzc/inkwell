@@ -521,6 +521,20 @@ fn write_export(app: &tauri::AppHandle, path: &str, bytes: &[u8]) -> Result<()> 
     Ok(())
 }
 
+/// 回写封面缩略图（PDF 首次打开时前端渲染第 1 页生成后送来）。返回封面相对文件名。
+#[tauri::command]
+fn save_book_cover(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    cover: Vec<u8>,
+) -> Result<String> {
+    let conn = state
+        .conn
+        .lock()
+        .map_err(|_| Error::Other("数据库锁已损坏".into()))?;
+    library::update_cover(&conn, &state.covers_dir(), &id, &cover)
+}
+
 #[tauri::command]
 fn rename_book(
     state: tauri::State<'_, AppState>,
@@ -608,6 +622,7 @@ pub fn run() {
             touch_book,
             save_progress,
             rename_book,
+            save_book_cover,
             list_annotations,
             add_annotation,
             update_annotation,

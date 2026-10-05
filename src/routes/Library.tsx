@@ -2,6 +2,7 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import AppThemeToggle from '@/components/AppThemeToggle';
 import BookCard from '@/components/BookCard';
 import { api, type Book } from '@/lib/api';
 import { type SortKey, selectVisibleBooks, useLibrary } from '@/store/library';
@@ -91,13 +92,13 @@ export default function Library() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral-950 text-neutral-100">
-      <header className="sticky top-0 z-10 border-b border-neutral-800/80 bg-neutral-950/95 backdrop-blur">
+    <div className="min-h-screen bg-app-bg text-app-fg">
+      <header className="sticky top-0 z-10 border-b border-app-border bg-app-bg/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3 px-5 py-3">
-          <h1 className="font-serif text-xl tracking-[0.2em] text-amber-100/90">
+          <h1 className="font-serif text-xl tracking-[0.2em] text-app-accent">
             砚池
             {version !== null && (
-              <span className="ml-1.5 align-middle font-sans text-[10px] tracking-normal text-neutral-600">
+              <span className="ml-1.5 align-middle font-sans text-[10px] tracking-normal text-app-muted">
                 v{version}
               </span>
             )}
@@ -107,13 +108,13 @@ export default function Library() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="搜索书名或作者"
-            className="min-w-40 flex-1 rounded border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-sm outline-none placeholder:text-neutral-600 focus:border-amber-200/40"
+            className="min-w-40 flex-1 rounded border border-app-border bg-app-surface px-3 py-1.5 text-sm text-app-fg outline-none placeholder:text-app-muted focus:border-amber-500/60"
           />
 
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value as SortKey)}
-            className="cursor-pointer rounded border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-sm outline-none focus:border-amber-200/40"
+            className="cursor-pointer rounded border border-app-border bg-app-surface px-2 py-1.5 text-sm text-app-fg outline-none focus:border-amber-500/60"
           >
             {Object.entries(SORT_LABELS).map(([k, label]) => (
               <option key={k} value={k}>
@@ -121,6 +122,8 @@ export default function Library() {
               </option>
             ))}
           </select>
+
+          <AppThemeToggle />
 
           <button
             type="button"
@@ -134,26 +137,26 @@ export default function Library() {
 
         {(notice !== null || error !== null) && (
           <div className="mx-auto max-w-6xl px-5 pb-2.5">
-            {error !== null && <p className="text-xs text-red-400">{error}</p>}
+            {error !== null && <p className="text-xs text-red-500">{error}</p>}
             {notice !== null && error === null && (
-              <p className="text-xs text-neutral-400">{notice}</p>
+              <p className="text-xs text-app-muted">{notice}</p>
             )}
           </div>
         )}
       </header>
 
       <main className="mx-auto max-w-6xl px-5 py-6">
-        {loading && total === 0 && <p className="text-sm text-neutral-500">正在读取书库…</p>}
+        {loading && total === 0 && <p className="text-sm text-app-muted">正在读取书库…</p>}
 
         {!loading && total === 0 && (
           <div className="mt-24 text-center">
-            <p className="font-serif text-2xl text-neutral-600">书库是空的</p>
-            <p className="mt-2 text-sm text-neutral-600">点「导入书籍」，选几本 EPUB 试试</p>
+            <p className="font-serif text-2xl text-app-muted">书库是空的</p>
+            <p className="mt-2 text-sm text-app-muted">点「导入书籍」，选几本 EPUB / PDF 试试</p>
           </div>
         )}
 
         {total > 0 && books.length === 0 && (
-          <p className="mt-16 text-center text-sm text-neutral-500">没有匹配「{query}」的书</p>
+          <p className="mt-16 text-center text-sm text-app-muted">没有匹配「{query}」的书</p>
         )}
 
         {books.length > 0 && (
@@ -167,16 +170,16 @@ export default function Library() {
 
       {pendingDelete !== null && (
         <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/60 px-5">
-          <div className="w-full max-w-sm rounded-lg border border-neutral-800 bg-neutral-900 p-5">
-            <p className="text-sm text-neutral-200">确定删除《{pendingDelete.title}》？</p>
-            <p className="mt-1.5 text-xs text-neutral-500">
+          <div className="w-full max-w-sm rounded-lg border border-app-border bg-app-surface p-5">
+            <p className="text-sm text-app-fg">确定删除《{pendingDelete.title}》？</p>
+            <p className="mt-1.5 text-xs text-app-muted">
               书籍文件、封面与阅读记录都会一并删除，无法恢复。
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setPendingDelete(null)}
-                className="cursor-pointer rounded border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:bg-neutral-800"
+                className="cursor-pointer rounded border border-app-border px-3 py-1.5 text-sm text-app-fg hover:bg-app-hover"
               >
                 取消
               </button>

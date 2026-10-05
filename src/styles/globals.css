@@ -5,3 +5,52 @@
   --font-sans: "Segoe UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
   --font-serif: "Source Han Serif SC", "Songti SC", "SimSun", Georgia, serif;
 }
+
+/* ─────────────── App 外壳配色（REQ-2026-10-05-08）───────────────
+   与「阅读主题」是两回事：
+   - App 主题（这里）：书库、设置 / 目录 / 批注面板、阅读页顶栏与底栏、按钮与输入框；
+   - 阅读主题（reader-settings）：只作用于正文页面。
+   两套配色混用曾经出过「深底黑字」的 bug（REQ-2026-10-05-07），所以面板一律
+   只用自己的变量，不再继承根节点的 color。
+
+   ⚠️ 不要改用 Tailwind 的 dark: 变体：它默认跟随**系统**深浅，而我们需要跟随
+   App 自己的设置（选了「跟随系统」时才由 JS 解析系统值）。因此配色一律走这几个
+   变量，根节点上的 data-app-theme 永远是解析后的 light / dark。 */
+:root {
+  --app-bg: #f4f4f5;
+  --app-surface: #ffffff;
+  --app-surface-strong: #f1f1f3;
+  --app-fg: #18181b;
+  --app-muted: #6b7280;
+  --app-border: #d4d4d8;
+  --app-hover: rgb(0 0 0 / 0.07);
+  --app-accent: #b45309;
+}
+
+[data-app-theme="dark"] {
+  --app-bg: #0a0a0a;
+  --app-surface: #171717;
+  --app-surface-strong: #262626;
+  --app-fg: #f5f5f5;
+  --app-muted: #a3a3a3;
+  --app-border: #333333;
+  --app-hover: rgb(255 255 255 / 0.09);
+  --app-accent: #fde68a;
+}
+
+/* inline：让 bg-app-surface 这类工具类直接引用上面的变量，
+   这样变量在 [data-app-theme] 上的切换才能真正生效。 */
+@theme inline {
+  --color-app-bg: var(--app-bg);
+  --color-app-surface: var(--app-surface);
+  --color-app-surface-strong: var(--app-surface-strong);
+  --color-app-fg: var(--app-fg);
+  --color-app-muted: var(--app-muted);
+  --color-app-border: var(--app-border);
+  --color-app-hover: var(--app-hover);
+  --color-app-accent: var(--app-accent);
+}
+
+html {
+  background-color: var(--app-bg);
+}

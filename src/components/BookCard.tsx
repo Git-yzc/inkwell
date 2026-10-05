@@ -38,7 +38,7 @@ export default function BookCard({ book, onOpen, onDelete }: Props) {
         className="block w-full cursor-pointer text-left"
         title={book.title}
       >
-        <div className="relative aspect-[2/3] overflow-hidden rounded-md bg-neutral-800 shadow-lg ring-1 ring-neutral-700/60 transition group-hover:ring-amber-200/40">
+        <div className="relative aspect-[2/3] overflow-hidden rounded-md bg-app-surface-strong shadow-lg ring-1 ring-app-border transition group-hover:ring-amber-500/50">
           {showImage ? (
             <img
               src={convertFileSrc(book.coverAbsPath as string)}
@@ -67,11 +67,11 @@ export default function BookCard({ book, onOpen, onDelete }: Props) {
         </div>
 
         <div className="mt-2 px-0.5">
-          <p className="truncate text-sm text-neutral-100">{book.title}</p>
-          <p className="mt-0.5 truncate text-xs text-neutral-500">
+          <p className="truncate text-sm text-app-fg">{book.title}</p>
+          <p className="mt-0.5 truncate text-xs text-app-muted">
             {book.author ?? '未知作者'}
             {book.progressPct > 0 && !book.finished && (
-              <span className="ml-1.5 text-amber-200/70">{formatPercent(book.progressPct)}</span>
+              <span className="ml-1.5 text-app-accent">{formatPercent(book.progressPct)}</span>
             )}
           </p>
         </div>

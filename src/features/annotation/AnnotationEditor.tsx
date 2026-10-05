@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 
-import type { Annotation, HighlightColor } from '@/lib/api';
 import {
-  HIGHLIGHT_COLORS,
   HIGHLIGHT_COLOR_ORDER,
+  HIGHLIGHT_COLORS,
   type SelectionInfo,
-  type ThemeKey,
-  THEMES,
 } from '@/features/reader/engine/types';
+import type { Annotation, HighlightColor } from '@/lib/api';
 
 export type EditorTarget =
   | { mode: 'new'; selection: SelectionInfo; chapter: string | null }
@@ -15,7 +13,6 @@ export type EditorTarget =
 
 interface Props {
   target: EditorTarget;
-  theme: ThemeKey;
   busy: boolean;
   onSave: (patch: { color: HighlightColor | null; note: string | null }) => void;
   onDelete?: () => void;
@@ -33,14 +30,7 @@ interface Props {
  * 新建时：点色块**一步**就是一条高亮（不带笔记）；要写笔记再点「笔记」展开输入框。
  * 编辑时：直接展开输入框，可以改色、改笔记、删除。
  */
-export default function AnnotationEditor({
-  target,
-  theme,
-  busy,
-  onSave,
-  onDelete,
-  onCancel,
-}: Props) {
+export default function AnnotationEditor({ target, busy, onSave, onDelete, onCancel }: Props) {
   const editing = target.mode === 'edit';
   const existing = editing ? target.annotation : null;
 
@@ -54,24 +44,20 @@ export default function AnnotationEditor({
     if (showNote) textareaRef.current?.focus();
   }, [showNote]);
 
-  const t = THEMES[theme];
   const excerpt = (editing ? (existing?.text ?? '') : target.selection.text).trim();
 
   return (
-    <div className="border-t border-neutral-700 bg-neutral-900/98 shadow-[0_-8px_24px_rgba(0,0,0,.35)] backdrop-blur">
+    <div className="border-t border-app-border bg-app-surface shadow-[0_-8px_24px_rgba(0,0,0,.25)] backdrop-blur">
       <div className="mx-auto flex max-w-3xl flex-col gap-2 px-3 py-2.5">
         <div className="flex items-start gap-2">
-          <p
-            className="line-clamp-1 min-w-0 flex-1 border-l-2 pl-2 text-[11px] leading-5"
-            style={{ borderColor: t.muted, color: t.muted }}
-          >
+          <p className="line-clamp-1 min-w-0 flex-1 border-l-2 border-app-border pl-2 text-[11px] leading-5 text-app-muted">
             {excerpt || '（书签）'}
           </p>
           <button
             type="button"
             onClick={onCancel}
             aria-label="关闭"
-            className="-mt-0.5 shrink-0 cursor-pointer rounded px-1.5 py-0.5 text-xs text-neutral-500 hover:text-neutral-200"
+            className="-mt-0.5 shrink-0 cursor-pointer rounded px-1.5 py-0.5 text-xs text-app-muted hover:text-app-fg"
           >
             ✕
           </button>
@@ -106,7 +92,7 @@ export default function AnnotationEditor({
               <button
                 type="button"
                 onClick={() => setShowNote((v) => !v)}
-                className="cursor-pointer rounded border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800"
+                className="cursor-pointer rounded border border-app-border px-3 py-1.5 text-xs text-app-fg hover:bg-app-hover"
               >
                 {showNote ? '收起笔记' : '笔记'}
               </button>
@@ -144,7 +130,7 @@ export default function AnnotationEditor({
               onChange={(e) => setNote(e.target.value)}
               rows={2}
               placeholder="写点想法…（留空即纯高亮）"
-              className="min-w-0 flex-1 resize-none rounded border border-neutral-700 bg-neutral-800 px-2 py-1.5 text-xs text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-amber-200/50"
+              className="min-w-0 flex-1 resize-none rounded border border-app-border bg-app-surface-strong px-2 py-1.5 text-xs text-app-fg outline-none placeholder:text-app-muted focus:border-amber-500/60"
             />
             {!editing && (
               <button

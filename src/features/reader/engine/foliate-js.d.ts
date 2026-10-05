@@ -41,6 +41,8 @@ declare module 'foliate-js/view.js' {
     /** 清掉所有书籍文档里的选区。 */
     deselect(): void;
 
+    /** 内核判定的固定版式（pre-paginated，如 PDF / 漫画）。open() 期间就会置好。 */
+    isFixedLayout: boolean;
     /** 已打开的书籍对象：metadata / toc / sections / dir 等。 */
     book: FoliateBook | null;
     /** 实际渲染器（paginator 或 fixed-layout）。 */
@@ -54,6 +56,14 @@ declare module 'foliate-js/view.js' {
     toc?: FoliateTocItem[];
     sections?: { id?: string; linear?: string; size?: number }[];
     rendition?: { layout?: string };
+    /** PDF 等内核实现：把第 1 页渲成图片（PNG）。未实现的格式没有这个方法。 */
+    getCover?: () => Promise<Blob | null>;
+    /**
+     * 内核用这两个方法把目录项映射到「第几节 + 节内锚点」，也就是进度折算的基础。
+     * 缺失时内核不会建 sectionProgress，`goToFraction` 会直接抛错 —— 调用前必须确认。
+     */
+    splitTOCHref?: (href: string) => Promise<[number, unknown] | null>;
+    getTOCFragment?: (doc: Document, fragment: unknown) => Element | null;
   }
 
   export interface FoliateTocItem {

@@ -1,5 +1,5 @@
-import type { Annotation, ExportFormat } from '@/lib/api';
 import { HIGHLIGHT_COLORS, type HighlightColorName } from '@/features/reader/engine/types';
+import type { Annotation, ExportFormat } from '@/lib/api';
 import { formatRelative } from '@/lib/util';
 
 interface Props {
@@ -32,7 +32,7 @@ function Row({
       <button
         type="button"
         onClick={() => onJump(item)}
-        className="w-full cursor-pointer rounded px-2 py-2 pr-7 text-left transition hover:bg-neutral-800"
+        className="w-full cursor-pointer rounded px-2 py-2 pr-7 text-left transition hover:bg-app-hover"
       >
         <div className="flex gap-2">
           {isBookmark ? (
@@ -45,16 +45,16 @@ function Row({
           )}
           <div className="min-w-0 flex-1">
             {isBookmark ? (
-              <p className="text-xs text-neutral-400">书签 · {item.chapter || '未分章'}</p>
+              <p className="text-xs text-app-muted">书签 · {item.chapter || '未分章'}</p>
             ) : (
-              <p className="line-clamp-3 text-xs leading-5 text-neutral-200">{item.text}</p>
+              <p className="line-clamp-3 text-xs leading-5 text-app-fg">{item.text}</p>
             )}
             {item.note && (
-              <p className="mt-1 line-clamp-3 border-l-2 border-amber-200/40 pl-2 text-[11px] leading-snug text-neutral-400">
+              <p className="mt-1 line-clamp-3 border-l-2 border-amber-500/50 pl-2 text-[11px] leading-snug text-app-muted">
                 {item.note}
               </p>
             )}
-            <p className="mt-1 truncate text-[10px] text-neutral-600">
+            <p className="mt-1 truncate text-[10px] text-app-muted">
               {item.chapter || '未分章'} · {formatRelative(item.createdAt)}
             </p>
           </div>
@@ -70,7 +70,7 @@ function Row({
         }}
         // ⚠️ pointer-coarse 不能省：安卓上没有 hover，只写 group-hover 的话
         // 触摸设备永远看不到删除按钮（书库卡片也踩过同样的坑）。
-        className="absolute top-1.5 right-1.5 hidden cursor-pointer rounded px-1.5 text-xs text-neutral-500 hover:text-red-300 group-hover:block pointer-coarse:block"
+        className="absolute top-1.5 right-1.5 hidden cursor-pointer rounded px-1.5 text-xs text-app-muted hover:text-red-400 group-hover:block pointer-coarse:block"
       >
         ✕
       </button>
@@ -90,12 +90,12 @@ export default function AnnotationPanel({
   const bookmarks = annotations.length - highlights;
 
   return (
-    <aside className="flex h-full w-80 flex-col border-l border-neutral-800 bg-neutral-900">
-      <header className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
+    <aside className="flex h-full w-80 flex-col border-l border-app-border bg-app-surface">
+      <header className="flex items-center justify-between border-b border-app-border px-4 py-3">
         <div className="flex items-baseline gap-2">
-          <h2 className="text-sm text-neutral-200">批注</h2>
+          <h2 className="text-sm text-app-fg">批注</h2>
           {annotations.length > 0 && (
-            <span className="text-[10px] text-neutral-500">
+            <span className="text-[10px] text-app-muted">
               {highlights} 条高亮 · {bookmarks} 个书签
             </span>
           )}
@@ -103,7 +103,7 @@ export default function AnnotationPanel({
         <button
           type="button"
           onClick={onClose}
-          className="cursor-pointer px-1 text-neutral-500 hover:text-neutral-200"
+          className="cursor-pointer px-1 text-app-muted hover:text-app-fg"
           aria-label="关闭"
         >
           ✕
@@ -112,7 +112,7 @@ export default function AnnotationPanel({
 
       <div className="flex-1 overflow-y-auto py-2">
         {annotations.length === 0 ? (
-          <p className="px-4 py-6 text-center text-xs text-neutral-600">
+          <p className="px-4 py-6 text-center text-xs text-app-muted">
             还没有批注。
             <br />
             选中正文即可高亮，点顶栏的 ☆ 加书签。
@@ -126,12 +126,12 @@ export default function AnnotationPanel({
         )}
       </div>
 
-      <footer className="flex gap-2 border-t border-neutral-800 p-3">
+      <footer className="flex gap-2 border-t border-app-border p-3">
         <button
           type="button"
           disabled={exporting || annotations.length === 0}
           onClick={() => onExport('markdown')}
-          className="flex-1 cursor-pointer rounded border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-40"
+          className="flex-1 cursor-pointer rounded border border-app-border px-3 py-1.5 text-xs text-app-fg hover:bg-app-hover disabled:opacity-40"
         >
           {exporting ? '导出中…' : '导出 Markdown'}
         </button>
@@ -139,7 +139,7 @@ export default function AnnotationPanel({
           type="button"
           disabled={exporting || annotations.length === 0}
           onClick={() => onExport('json')}
-          className="flex-1 cursor-pointer rounded border border-neutral-700 px-3 py-1.5 text-xs text-neutral-300 hover:bg-neutral-800 disabled:opacity-40"
+          className="flex-1 cursor-pointer rounded border border-app-border px-3 py-1.5 text-xs text-app-fg hover:bg-app-hover disabled:opacity-40"
         >
           导出 JSON
         </button>
