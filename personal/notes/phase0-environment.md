@@ -59,9 +59,9 @@ Vite 依赖 esbuild，esbuild 以**管道 stdio** 启动一个常驻子进程做
 ### 3. Tauri CLI 的 argv 探测在 Electron 宿主下会误判
 
 `@tauri-apps/cli/tauri.js` 第 23 行用 `process.argv[0]` 的文件名判断宿主是否
-`node|nodejs|bun|electron`。DSH 下 `argv[0]` 是 `D:\tool\DSH Desktop\DSH Desktop.exe`，
+`node|nodejs|bun|electron`。DSH 下 `argv[0]` 是 `<DSH 安装目录>\DSH Desktop.exe`，
 匹配不上，脚本就把该路径当成子命令塞回去，报
-`error: unrecognized subcommand 'D:\tool\DSH Desktop\DSH Desktop.exe'`。
+`error: unrecognized subcommand '<DSH 安装目录>\DSH Desktop.exe'`。
 
 解决：用 `personal/scripts/tauri.mjs` 包装器直接调 `@tauri-apps/cli/main.js`，
 不猜宿主。`package.json` 的 `tauri` 脚本已指向它。
