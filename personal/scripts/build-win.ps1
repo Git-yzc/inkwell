@@ -122,8 +122,28 @@ if ($found.Count -gt 0) {
         Write-Host ('  安装包: ' + $f.FullName) -ForegroundColor Green
         Write-Host ('  大小  : ' + [Math]::Round($f.Length / 1MB, 1) + ' MB') -ForegroundColor DarkGray
     }
+
+    # ⚠️ 另存一份到工作区**外**。
+    # DSH 沙箱按「可执行文件是否位于会话工作区内」限制进程写入：直接双击上面那个路径
+    # 的安装包，安装器什么都写不进去（NSIS 弹「无法打开要写入的文件」，
+    # 连维护页里的「卸载」也会被拖累）。把副本放到 Downloads 下双击就没这回事。
+    $shelf = Join-Path $env:USERPROFILE 'Downloads\Inkwell'
+    New-Item -ItemType Directory -Path $shelf -Force | Out-Null
+    # 只放**这一次**的产物，并清掉架子上以前的安装包：一堆历史版本放一起最容易被点错
+    $version = (Get-Content (Join-Path $RepoRoot 'src-tauri\tauri.conf.json') -Raw | ConvertFrom-Json).version
+    Get-ChildItem (Join-Path $shelf 'Inkwell*setup.exe') -ErrorAction SilentlyContinue | Remove-Item -Force
+    $current = Get-ChildItem (Join-Path $nsisDir ("Inkwell_{0}_x64-setup.exe" -f $version)) -ErrorAction SilentlyContinue
+    if ($current) {
+        Copy-Item $current.FullName (Join-Path $shelf ("Inkwell-{0}-win-x64-setup.exe" -f $version)) -Force
+    } else {
+        Write-Bad ('没找到本次版本的安装包: Inkwell_' + $version + '_x64-setup.exe')
+    }
+
     Write-Host ''
-    Write-Host '  双击安装即可（当前用户安装，不需要管理员）。' -ForegroundColor White
+    Write-Host ('  ✅ 双击这份装（在工作区外）: ' + (Join-Path $shelf ("Inkwell-{0}-win-x64-setup.exe" -f $version))) -ForegroundColor Yellow
+    Write-Host '  ⚠️ 别双击工作区里那份 —— 会被会话沙箱拦掉写入。' -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host '  当前用户安装，不需要管理员。' -ForegroundColor White
     exit 0
 } else {
     Write-Bad ('构建返回成功，但没在 ' + $nsisDir + ' 找到安装包')
