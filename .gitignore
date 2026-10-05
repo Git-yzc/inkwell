@@ -66,3 +66,6 @@ coverage/
 playwright-report/
 test-results/
 /tmp/
+
+# 外部工具留下的元数据目录，与本项目无关
+.sf/
