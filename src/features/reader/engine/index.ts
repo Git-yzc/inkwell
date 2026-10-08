@@ -21,6 +21,7 @@ import 'foliate-js/view.js';
 import { Overlayer } from 'foliate-js/overlayer.js';
 import type { FoliateLocation, FoliateTocItem, View } from 'foliate-js/view.js';
 
+import { adaptAuthorColors } from './author-colors';
 import {
   type BookInfo,
   type HighlightView,
@@ -311,6 +312,7 @@ export class ReaderEngine {
       this.#fixedLayout = this.#view.isFixedLayout === true;
       // 换章节时内核会重建 iframe 文档，样式、滚轮与选区监听都要重新挂
       this.#applyRendererAttributes();
+      this.#adaptAuthorColors(detail?.doc);
       this.#bindWheel(detail?.doc);
       this.#bindDoubleTap(detail?.doc);
       // 固定版式（PDF）本次不做批注：不绑划词与下拉手势，
@@ -578,6 +580,24 @@ export class ReaderEngine {
   applySettings(settings: RendererSettings): void {
     this.#settings = settings;
     this.#applyRendererAttributes();
+    // 主题换了，作者点名的字色要跟着重算（浅色主题下是「还原」）
+    this.#adaptAuthorColors();
+  }
+
+  /**
+   * 按当前阅读主题适配正文里作者点名的字色。
+   *
+   * 换主题、换章节都要重算：前者因为对比度基准变了，后者因为内核会重建书籍文档。
+   * `doc` 传空时取当前正在渲染的文档 —— 内核的 `getContents()` 在分页渲染器下
+   * 只返回这一份（见 paginator.js）。
+   */
+  #adaptAuthorColors(doc?: Document | null): void {
+    const s = this.#settings;
+    // 固定版式（PDF / 漫画）是整页位图，没有可调的文字颜色
+    if (!s || this.#fixedLayout) return;
+    const target = doc ?? this.#view.renderer?.getContents?.()[0]?.doc;
+    if (!target) return;
+    adaptAuthorColors(target, THEMES[s.theme].bg);
   }
 
   #applyRendererAttributes(): void {

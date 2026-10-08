@@ -83,6 +83,8 @@ declare module 'foliate-js/view.js' {
 
   export interface FoliateRenderer extends HTMLElement {
     setStyles?: (css: string) => void;
+    /** 当前渲染中的书籍文档（分页渲染器下只有一份）。 */
+    getContents?: () => { index: number; doc: Document }[];
   }
 }
 
