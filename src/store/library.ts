@@ -14,6 +14,10 @@ export interface ImportResult {
   imported: number;
   duplicates: string[];
   failed: string[];
+  /** 新导入书籍的 id（顺序同 imported 计数） */
+  importedIds: string[];
+  /** 判定为重复时，库里已有那本的 id（顺序同 duplicates） */
+  duplicateIds: string[];
 }
 
 interface LibraryState {
@@ -59,6 +63,8 @@ export const useLibrary = create<LibraryState>((set, get) => ({
         imported: summary.imported,
         duplicates: summary.duplicates,
         failed: summary.failed,
+        importedIds: summary.importedIds,
+        duplicateIds: summary.duplicateIds,
       };
     } catch (e) {
       set({ error: readableError(e), loading: false });

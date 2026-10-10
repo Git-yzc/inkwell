@@ -55,6 +55,20 @@ pub struct ImportSummary {
     pub duplicates: Vec<String>,
     /// 失败的文件与原因
     pub failed: Vec<String>,
+    /// 新导入书籍的 id，顺序与 `imported` 计数一致（外部「打开文件」要靠它直接进阅读器）
+    pub imported_ids: Vec<String>,
+    /// 判定为重复时，库里**已有**那本的 id，顺序与 `duplicates` 一致
+    pub duplicate_ids: Vec<String>,
+}
+
+/// 单个文件的导入结果。
+///
+/// 重复时把**已有那本的 id** 带回来：系统「打开方式」递进来一个已经入库的 epub 时，
+/// 前端要直接跳到那一本（且续读上次位置），拿不到 id 就只能干瞪眼。
+#[derive(Debug)]
+pub enum ImportOutcome {
+    Imported(Box<Book>),
+    Duplicate { id: String, title: String },
 }
 
 pub fn now_secs() -> i64 {
@@ -132,13 +146,13 @@ fn make_thumbnail(bytes: &[u8]) -> Option<(Vec<u8>, &'static str)> {
     None
 }
 
-/// 导入一个文件。返回 `None` 表示内容重复、已跳过。
+/// 导入一个文件。内容重复时返回 `ImportOutcome::Duplicate`（带上库里已有那本的 id）。
 pub fn import_one(
     conn: &Connection,
     books_dir: &Path,
     covers_dir: &Path,
     src: &Path,
-) -> Result<Option<Book>> {
+) -> Result<ImportOutcome> {
     let format = match format_of(src) {
         Some(f) => f,
         None => {
@@ -155,17 +169,18 @@ pub fn import_one(
 
     let hash = file_fingerprint(src)?;
 
-    // 内容级去重：同一本书换个文件名再导入也不会重复
-    let existing: Option<String> = conn
+    // 内容级去重：同一本书换个文件名再导入也不会重复。
+    // 连 id 一起取回来 —— 「打开方式」遇到已入库的书要直接跳过去读（含续读上次位置）。
+    let existing: Option<(String, String)> = conn
         .query_row(
-            "SELECT title FROM books WHERE file_hash = ?1",
+            "SELECT id, title FROM books WHERE file_hash = ?1",
             params![hash],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()?;
-    if let Some(title) = existing {
+    if let Some((id, title)) = existing {
         log::info!("跳过重复书籍：{title}");
-        return Ok(None);
+        return Ok(ImportOutcome::Duplicate { id, title });
     }
 
     let id = uuid::Uuid::new_v4().to_string();
@@ -235,7 +250,7 @@ pub fn import_one(
     )?;
 
     let book = get(conn, &id)?.ok_or_else(|| Error::Other("导入后未能读回书籍记录".into()))?;
-    Ok(Some(book))
+    Ok(ImportOutcome::Imported(Box::new(book)))
 }
 
 fn row_to_book(row: &rusqlite::Row) -> rusqlite::Result<Book> {
@@ -455,9 +470,12 @@ mod tests {
         let covers_dir = tmp.join("covers");
 
         // 第一次导入
-        let book = import_one(&conn, &books_dir, &covers_dir, &src)
-            .expect("导入失败")
-            .expect("首次导入应返回书籍");
+        let book = match import_one(&conn, &books_dir, &covers_dir, &src).expect("导入失败") {
+            ImportOutcome::Imported(b) => *b,
+            ImportOutcome::Duplicate { title, .. } => {
+                panic!("首次导入不应判定为重复（命中了已有记录：{title}）")
+            }
+        };
         println!("标题 = {}", book.title);
         println!("作者 = {:?}", book.author);
         println!("格式 = {}", book.format);
@@ -501,9 +519,15 @@ mod tests {
         assert_eq!(list(&conn).unwrap().len(), 1);
         assert_eq!(get(&conn, &book.id).unwrap().unwrap().title, book.title);
 
-        // 再导一次同样的文件：应按内容指纹识别为重复，不再入库
-        let again = import_one(&conn, &books_dir, &covers_dir, &src).expect("二次导入不应报错");
-        assert!(again.is_none(), "内容相同的书应被判定为重复");
+        // 再导一次同样的文件：应按内容指纹识别为重复，不再入库，
+        // 并把**已有那本的 id** 带回来（「打开方式」要靠它跳到已入库的书）
+        match import_one(&conn, &books_dir, &covers_dir, &src).expect("二次导入不应报错") {
+            ImportOutcome::Duplicate { id, title } => {
+                assert_eq!(id, book.id, "重复时应带回库里已有那本的 id");
+                assert_eq!(title, book.title);
+            }
+            ImportOutcome::Imported(_) => panic!("内容相同的书应被判定为重复"),
+        }
         assert_eq!(list(&conn).unwrap().len(), 1, "重复导入不应产生第二条记录");
 
         let _ = std::fs::remove_dir_all(&tmp);
@@ -535,8 +559,10 @@ mod tests {
 
         for p in paths {
             match import_one(&conn, &books_dir, &covers_dir, Path::new(&p)) {
-                Ok(Some(b)) => println!("已导入: {}", b.title),
-                Ok(None) => println!("已存在，跳过: {p}"),
+                Ok(ImportOutcome::Imported(b)) => println!("已导入: {}", b.title),
+                Ok(ImportOutcome::Duplicate { title, .. }) => {
+                    println!("已存在（{title}），跳过: {p}")
+                }
                 Err(e) => println!("导入失败 {p}: {e}"),
             }
         }

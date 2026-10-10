@@ -12,6 +12,7 @@ mod db;
 mod epub;
 mod error;
 mod library;
+mod openfile;
 
 use error::{Error, Result};
 use rusqlite::Connection;
@@ -26,6 +27,13 @@ use tauri_plugin_fs::{FilePath, FsExt, OpenOptions};
 pub struct AppState {
     pub conn: Mutex<Connection>,
     pub data_dir: PathBuf,
+    /// 启动时系统递进来的、等着打开的书籍路径（双击 epub / 「打开方式 → 砚池」）。
+    /// 前端取一次即清空；没有这种启动就是空的。
+    ///
+    /// 只在桌面端存在：Android 的文件来自 Intent，按需向 Kotlin 插件索取（见 openfile.rs），
+    /// 不经过这里 —— 在 Android 上留着这个字段只会是个「从没被读过」的死字段。
+    #[cfg(desktop)]
+    pending_open: Mutex<Vec<String>>,
 }
 
 impl AppState {
@@ -59,6 +67,19 @@ fn data_dir() -> Option<PathBuf> {
 #[cfg(mobile)]
 fn data_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
     app.path().app_data_dir().ok()
+}
+
+/// 从命令行参数里挑出「系统要求用砚池打开的文件」。
+///
+/// 双击 epub（或「打开方式 → 砚池」）时，系统会把文件路径当参数传给新进程。
+/// 按 Q5 只取**第一个**可识别的文件；其余参数（Windows 偶尔会塞些 `--flag`）一律忽略。
+/// 只认「扩展名受支持 + 确实是文件」，避免把开关当书导入。
+#[cfg(desktop)]
+fn first_openable_arg<I: IntoIterator<Item = String>>(args: I) -> Option<String> {
+    args.into_iter().find(|a| {
+        let p = Path::new(a);
+        library::format_of(p).is_some() && p.is_file()
+    })
 }
 
 /// 子目录布局：books/ 放书籍本体，covers/ 放封面缩略图。
@@ -98,6 +119,34 @@ fn app_info(app: tauri::AppHandle) -> AppInfo {
         platform: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
         data_dir: dir.map(|p| p.display().to_string()),
+    }
+}
+
+/// 取走「系统要求打开的书籍」队列（取一次即清空）。
+///
+/// 桌面端来自命令行参数（双击 epub / 打开方式），Android 来自 Intent（打开方式 / 分享），
+/// 后者得问 Kotlin 侧的插件要。前端拿到路径后自己走导入，再决定跳哪一本。
+#[tauri::command]
+fn take_pending_open(
+    #[allow(unused_variables)] app: tauri::AppHandle,
+    #[allow(unused_variables)] state: tauri::State<'_, AppState>,
+) -> Result<Vec<String>> {
+    #[cfg(target_os = "android")]
+    {
+        match app.try_state::<openfile::OpenFile<tauri::Wry>>() {
+            Some(plugin) => Ok(plugin.take().map_err(Error::Other)?.into_iter().collect()),
+            // 拿不到插件就只能算了：拿不到文件最多是「回书库」，不该把启动搞崩。
+            None => Ok(Vec::new()),
+        }
+    }
+    #[cfg(desktop)]
+    {
+        let _ = &app;
+        let mut queue = state
+            .pending_open
+            .lock()
+            .map_err(|_| Error::Other("待打开队列的锁已损坏".into()))?;
+        Ok(std::mem::take(&mut *queue))
     }
 }
 
@@ -351,11 +400,16 @@ fn import_books(
         }
 
         match library::import_one(&conn, &books_dir, &covers_dir, &path) {
-            Ok(Some(book)) => {
+            Ok(library::ImportOutcome::Imported(book)) => {
                 summary.imported += 1;
+                summary.imported_ids.push(book.id.clone());
                 log::info!("已导入：{}", book.title);
             }
-            Ok(None) => summary.duplicates.push(display),
+            Ok(library::ImportOutcome::Duplicate { id, title }) => {
+                summary.duplicates.push(display);
+                summary.duplicate_ids.push(id);
+                log::info!("跳过重复书籍：{title}");
+            }
             Err(e) => summary.failed.push(format!("{display}：{e}")),
         }
     }
@@ -556,6 +610,8 @@ fn rename_book(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // 「用砚池打开」：桌面端读命令行参数，Android 读 Intent（见 openfile.rs）。
+        .plugin(openfile::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -606,15 +662,29 @@ pub fn run() {
             log::info!("数据目录：{}", dir.display());
             log::info!("数据库：{}", db_path.display());
 
+            // 「双击 epub 打开」：系统把文件路径当命令行参数递进来（只取第一个）。
+            // Android 的路径不在这里 —— 它走 Intent，由 openfile 插件按需索取。
+            #[cfg(desktop)]
+            let pending_open: Vec<String> = first_openable_arg(std::env::args().skip(1))
+                .into_iter()
+                .collect();
+            #[cfg(desktop)]
+            if let Some(path) = pending_open.first() {
+                log::info!("系统要求打开：{path}");
+            }
+
             app.manage(AppState {
                 conn: Mutex::new(conn),
                 data_dir: dir,
+                #[cfg(desktop)]
+                pending_open: Mutex::new(pending_open),
             });
 
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             app_info,
+            take_pending_open,
             list_books,
             get_book,
             import_books,

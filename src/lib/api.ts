@@ -40,6 +40,10 @@ export interface ImportSummary {
   duplicates: string[];
   /** 导入失败的「文件名：原因」 */
   failed: string[];
+  /** 新导入书籍的 id，顺序与 imported 计数一致 */
+  importedIds: string[];
+  /** 判定为重复时，库里已有那本的 id，顺序与 duplicates 一致 */
+  duplicateIds: string[];
 }
 
 /** 批注类型：划词高亮（可带笔记）与书签。 */
@@ -69,6 +73,13 @@ export type ExportFormat = 'markdown' | 'json';
 
 export const api = {
   appInfo: () => invoke<AppInfo>('app_info'),
+  /**
+   * 取走「系统要求用砚池打开的书籍」（取一次即清空）。
+   *
+   * 桌面端是双击 epub / 「打开方式」给命令行参数，Android 是 Intent，
+   * 两条路都由 Rust 侧统一收着。没有就是空数组。
+   */
+  takePendingOpen: () => invoke<string[]>('take_pending_open'),
   listBooks: () => invoke<Book[]>('list_books'),
   getBook: (id: string) => invoke<Book | null>('get_book', { id }),
   importBooks: (paths: string[]) => invoke<ImportSummary>('import_books', { paths }),

@@ -22,6 +22,37 @@
                 <!-- AndroidTV support -->
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
             </intent-filter>
+
+            <!--
+              「用砚池打开」：文件管理器 / 其他应用把 epub 递进来。
+              与 tauri.conf.json 的 bundle.fileAssociations 保持一致
+              （mimeType application/epub+zip、action view + send）。
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" android:mimeType="application/epub+zip" />
+                <data android:scheme="file" android:mimeType="application/epub+zip" />
+            </intent-filter>
+            <!--
+              有些来源给不出 MIME（或给的不是标准 epub mime），只能靠扩展名认。
+              注意：pathPattern 与 mimeType 不能混在同一个 intent-filter 里，故另起一条。
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" android:host="*" android:pathPattern=".*\.epub" />
+                <data android:scheme="file" android:host="*" android:pathPattern=".*\.epub" />
+            </intent-filter>
+
+            <!-- 「分享到砚池」：文件在 EXTRA_STREAM 里（见 OpenFilePlugin.kt）。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/epub+zip" />
+            </intent-filter>
         </activity>
 
         <provider

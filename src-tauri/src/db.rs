@@ -96,6 +96,13 @@ pub fn open(path: &Path) -> Result<Connection> {
     conn.pragma_update(None, "foreign_keys", "ON")?;
     conn.pragma_update(None, "synchronous", "NORMAL")?;
 
+    // 双击 epub 会为每个文件各开一个窗口（各是一个进程，见
+    // docs/REQUIREMENTS-2026-10-10-open-file.md Q3），两个实例同时写进度 / 批注是常态。
+    // 不设 busy_timeout 时 rusqlite 的超时是 0，另一个实例一持写锁就会立刻
+    // 报 "database is locked"（读源码得出，不是实测现象）。
+    // WAL 下写锁冲突靠这个退避重试解决，5 秒足够覆盖「一次进度写入」的粒度。
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
+
     migrate(&conn)?;
     Ok(conn)
 }
