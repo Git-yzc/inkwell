@@ -3,21 +3,26 @@
 > 本文档记录**尚未完成**的工作与**已知问题**，供后续按需取用。
 > 当前进度快照见下方「一、当前状态」；环境与流程约定见 [AGENTS.md](../AGENTS.md)。
 >
-> 最后更新：2026-10-08（**0.2.1 已修复**：夜间 / 深色阅读主题下正文里的作者字色不跟随主题，
-> 深字压深底看不清 —— 见 §2.7；0.2.0 的 App 白天 / 夜间、移动端工具栏交互、页号角标、
-> 页边距修复、PDF 导入与阅读见 §2.6）
+> 最后更新：2026-10-10（**0.2.2 已实现**：双击 / 「打开方式 → 砚池」直接进阅读器 ——
+> 见 §2.8 与 [`docs/REQUIREMENTS-2026-10-10-open-file.md`](REQUIREMENTS-2026-10-10-open-file.md)；
+> 0.2.1 已修复：夜间 / 深色阅读主题下正文里的作者字色不跟随主题，深字压深底看不清 —— 见 §2.7）
 >
 > 📌 **0.2.0 需求**见 [`docs/REQUIREMENTS-2026-10-05.md`](REQUIREMENTS-2026-10-05.md)
 > （8 条需求 / 17 条决策）。实现记录与新增的已知问题见本文 **§2.6**，
 > 逐条实现说明与实测结果见需求文档 **§八**。
+>
+> 📌 **0.2.2 需求（已实现）**见 [`docs/REQUIREMENTS-2026-10-10-open-file.md`](REQUIREMENTS-2026-10-10-open-file.md)，
+> 摘要、实现清单与实测结果见本文 **§2.8** —— Q1–Q6 已定案（导入再读 / 只关联 epub /
+> 新开窗口 / 重复书续读 / 只开第一个 / Android 打开+分享）。
+> ⚠️ Android 的「打开 / 分享」本机没设备，**真机未验**（见 §2.8 末）。
 
 ---
 
 ## 一、当前状态
 
 **阶段 0（环境与骨架）✅ 完成** · **阶段 1（MVP 阅读器）✅ 完成并验收通过**
-**阶段 2 进行中**：中文排版 ✅（§3.1）、批注 ✅（§3.4）、**0.2.0 增强批次 ✅ 已实现**（§2.6）；
-中文字体 / 简繁转换 / 全文搜索待做
+**阶段 2 进行中**：中文排版 ✅（§3.1）、批注 ✅（§3.4）、**0.2.0 增强批次 ✅ 已实现**（§2.6）、
+**0.2.2「打开方式直接阅读」✅ 已实现**（§2.8）；中文字体 / 简繁转换 / 全文搜索待做
 
 已经能用的：
 
@@ -32,6 +37,7 @@
 | **正文有色字** | 作者点名的字色按当前阅读主题自动调到可读（保色相只调明暗，§2.7） |
 | 中文排版 | 首行缩进 2 字、行首禁则、中西文自动间距（自动 / 开 / 关） |
 | 批注 | 划词高亮（四色）、笔记、书签、侧栏列表与跳转、导出 Markdown / JSON |
+| **打开方式** | 双击 / 「打开方式 → 砚池」epub 直接导入并进阅读器；已入库的跳那一本并续读上次位置（§2.8，Windows 已实测；Android 打开+分享待真机验证） |
 | 平台 | Windows（NSIS 安装包）、Android（APK）双端均可构建 |
 
 **用户验收结论**：基本可用。已修复「翻页模式下鼠标滚轮无效」（§2.1）
@@ -484,6 +490,84 @@ WebView 是否重新求值不能想当然。
 
 ---
 
+### 2.8 ✅ 已实现（0.2.2，2026-10-10）：双击 / 系统关联 epub 直接进阅读器
+
+> 这一条**不是 bug 修复，是缺功能**（整条入口链都没搭）。需求全文、决策记录与验收口径见
+> [`docs/REQUIREMENTS-2026-10-10-open-file.md`](REQUIREMENTS-2026-10-10-open-file.md)；
+> Q1–Q6 定案后一轮做完，**0.2.2 已出包**。
+
+**用户原话**：
+
+> 我现在的这个 epub 阅读器不支持即时打开 epub 文件，而是需要先导入后才能阅读。
+> 把它设为默认 epub 阅读器后，点击新的 epub 文件，只会启动这个软件进入书架页面，
+> 而不会打开阅读器阅读。
+
+**性质**：整条入口链都没搭 —— 注册关联 → 读命令行 → 导入并回 bookId → 前端跳阅读器，
+四段里一段都没有。（Q3 定了「新开窗口」，所以**单实例这一段不需要**。）
+已查证的事实（都有 file:line，见需求文档 §三）：
+
+| 环节 | 现状 |
+| --- | --- |
+| 注册关联 | `tauri.conf.json` 里**没有 `fileAssociations`** → 安装包不写关联（你现在是在 Windows「打开方式」里手工指到 `inkwell.exe` 的 —— 推断，待确认） |
+| 读参数 | `main.rs:4-6` 只有 `inkwell_lib::run()`，全仓库 `env::args` **零命中** → 系统传进来的文件路径无人接 |
+| 路由 | `App.tsx:8-12` 只有 `/`（书库）与 `/read/:id`，没有"待打开文件"入口 → 启动只能停在书库 |
+| 回 id | `import_books` 能收路径/URI，但 `ImportSummary`（`library.rs:51-57`）只有计数与名字，**不返回 bookId** → 拿到"导入成功"也跳不过去；重复书同样没有已有 id，**正好卡住"跳已有的"这条决策** |
+| Android | `AndroidManifest.xml:19-24` 的 intent-filter 只有 MAIN/LAUNCHER，没有 `ACTION_VIEW` / `ACTION_SEND` → 系统不会把 epub 递进来 |
+| **多实例写库** | `db.rs:95` 有 WAL 却**没有 `busy_timeout`**（grep 零命中）→ Q3 选「新开窗口」后，两个实例抢写会报 `database is locked`，**实现时必须一起补** |
+
+**决策定案（2026-10-10，Q1–Q6）**：
+
+1. 打开 = **导入到书库再读**（不是临时打开）；
+2. **只关联 `epub`**；
+3. 应用已在运行时 **新开窗口**（不做单实例复用 → **不引入新依赖**）；
+4. 库里已有同一本 → **跳已有那本，并续读上次位置**（续读是现成能力，`Reader.tsx:227-231`）；
+5. 一次多个文件 → **只打开第一个**；
+6. Android **打开（`ACTION_VIEW`）+ 分享（`ACTION_SEND`）都做**，且**要能给别人用**。
+
+**做了什么**（按数据流）：
+
+| # | 改动 | 文件 |
+| --- | --- | --- |
+| 1 | 注册 epub 关联（NSIS 里落成 `"$INSTDIR\inkwell.exe" "%1"`） | `tauri.conf.json` 的 `bundle.fileAssociations` |
+| 2 | 启动时从 `argv` 取**第一个**受支持的文件（滤掉 `--flag` 与不存在的路径） | `lib.rs` 的 `first_openable_arg` |
+| 3 | 待打开队列 + `take_pending_open` command（桌面读 argv，Android 问 Kotlin） | `lib.rs`、`openfile.rs`（新） |
+| 4 | `ImportSummary` 回 `imported_ids`/`duplicate_ids`；`import_one` 改返回 `ImportOutcome`（重复时带**已有那本的 id**） | `library.rs` |
+| 5 | 前端外壳消费待打开文件：导入 → `navigate('/read/'+id)`；失败弹中文提示 | `src/App.tsx`、`src/lib/open-file.ts`（新）、`api.ts`、`store/library.ts` |
+| 6 | Android：`ACTION_VIEW` / `ACTION_SEND` → 暂存 → `takePending`；热启动用 `window.__inkwellOpenFile()` 通知前端 | `OpenFilePlugin.kt`（新）、`AndroidManifest.xml` |
+| 7 | **多实例写库保护**：`busy_timeout(5s)` —— Q3 的「新开窗口」意味着两个进程会同时写同一个库 | `db.rs` |
+
+**踩到并修掉的两个坑**（都只在编 Android 时才暴露）：
+
+- `openfile.rs` 里 `app.manage(...)` 需要 `use tauri::Manager`，且这条 import 必须
+  `#[cfg(target_os = "android")]` —— 不 gate 的话桌面端是 unused import，gate 错位置就编不过。
+- `AppState.pending_open` 必须 `#[cfg(desktop)]`：Android 上它从来没被读过，
+  在 `-D warnings` 下直接编译失败（桌面端 `cargo check` 发现不了）。
+
+**验收（真实执行过的命令与结果）**：
+
+| 用例 | 结果 |
+| --- | --- |
+| `cargo test --lib`（`TEMP` 指进工作区，见 AGENTS §3） | ✅ 23 passed；含新断言「重复时带回已有 id」 |
+| `cargo test --lib -- --ignored imports_real_epub_end_to_end`（真实 EPUB） | ✅ 1 passed（封面 13 KB） |
+| `cargo clippy --lib -- -D warnings` / `pnpm typecheck` / `pnpm build` | ✅ 全部干净 |
+| 冷启动带**新** epub | ✅ 日志 `系统要求打开：…` → `已导入：…`；CDP 读到 `location.hash = #/read/<id>` 且 `foliate-view` 已挂载 |
+| 已在库的书再打开 | ✅ 日志 `跳过重复书籍`；books 目录仍只有 1 个文件；CDP 仍是 `#/read/<同一个 id>` |
+| **续读上次位置** | ✅ 先跳到 0.6211（DB `progressPct=0.6211`）→ 关掉 → 用同一个 epub 再启动 → `lastLocation.fraction=0.6211` |
+| 两个实例同时打开同一个 epub | ✅ 两个实例的前端都走到了导入（日志两条 `跳过重复书籍`），**没有** `database is locked` |
+| 无参数启动（回归） | ✅ 进书库，卡片显示 62%（进度在） |
+| 传不支持的扩展名 | ✅ 被 `first_openable_arg` 丢掉，照常进书库 |
+| 传坏掉的 `.epub` | ✅ 不崩；阅读器显示「打开失败：…」+「返回书库」按钮 |
+| 安装包脚本 | ✅ `installer.nsi:647` 有 `!insertmacro APP_ASSOCIATE "epub" …`，卸载侧也有 `APP_UNASSOCIATE` |
+
+> ⚠️ **Android 真机未验**（本机没连设备）：APK 已构建、清单里的 intent-filter 已校验，
+> 但「用砚池打开 / 分享到砚池」进阅读器**必须在手机上实测**才算数。
+>
+> ⚠️ 验证时踩到一个 CDP 假象：**两个实例共用同一个 WebView2 浏览器进程**，
+> 于是只有**先启动**那个的 `--remote-debugging-port` 在监听，第二个实例在调试端口上
+> 根本看不到（窗口却是好的）。要观察第二个实例就**看它的日志**，或先杀掉第一个。
+
+---
+
 ## 三、阶段 2：中文排版 + 批注 + 全文搜索
 
 ### 3.1 ✅ 已完成：中文排版（2026-09-20）
@@ -697,6 +781,8 @@ WebDAV 或局域网 HTTP，同步阅读进度（CFI）、批注、设置。
    全文搜索（§3.5）。⚠️ 这三项都要先跟用户确认：字体要定体积取舍，
    简繁与跨书搜索要引入新依赖（opencc-js / jieba-wasm）
 8. 然后按阶段 3 → 4 推进，每完成一块就出包给用户验收
+9. ~~双击 / 系统关联 epub 直接打开~~ ✅（§2.8，0.2.2）
+   Windows 已实测（含重复书续读、两实例并发）；**Android 的打开/分享仍待真机验证**
 
 > 每次改动界面后，**务必用 AGENTS.md §5.4 的 CDP 方法驱动真实应用验证一遍**。
 > 阶段 1 有三个「构建全绿、功能全废」的 bug 就是这样抓出来的；

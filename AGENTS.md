@@ -69,7 +69,7 @@
 
 **环境已全部就绪，双端均可构建。**
 
-> ⚠️ **在 DSH 沙箱里干活会撞到两类「假失败」**（0.2.0 实现时都踩过，别当成代码 bug）：
+> ⚠️ **在 DSH 沙箱里干活会撞到几类「假失败」**（0.2.0 / 0.2.2 实现时都踩过，别当成代码 bug）：
 > 1. **新编译出来的二进制写不了工作区之外**：`cargo test` 里往 `%TEMP%` 写文件的用例会报
 >    `Os { code: 5, kind: PermissionDenied }`，而同一次会话里 PowerShell 自己写同一目录没问题
 >    （`cmd` / `powershell` 这类系统二进制也不受影响）。这是沙箱按**镜像**做的限制。
@@ -86,6 +86,14 @@
 >    复制到 `%TEMP%` 再运行 → 正常装好。**连「维护页 → 卸载」也会一起失败**
 >    （安装器会拉起同样被限制的卸载器，NSIS 只报「无法卸载!」）。
 >    装软件、跑产物验证前先把文件复制出工作区。
+> 4. **`cargo build` 的产物同样起不来**（2026-10-10 实测踩到）：直接跑
+>    `src-tauri\target\release\inkwell.exe`，应用会在 setup 阶段 panic ——
+>    `failed to initialize plugin log: 拒绝访问。(os error 5)`，
+>    而且**数据目录（`$env:APPDATA`）即使就在工作区里也一样失败**
+>    （`.tmp`、工作区根下的新目录都试过；`books/`、`covers/` 反倒建得出来）。
+>    绕法：**先把 exe 复制出工作区再跑** ——
+>    `Copy-Item src-tauri\target\release\inkwell.exe "$env:TEMP\inkwell-e2e\"`，
+>    再让 CDP / 双击验证走这个副本（数据目录此时指哪都行）。
 >
 >    👉 **所以出包后要把安装包另存一份到工作区外给用户双击**：
 >    `build-win.ps1` 现在会自动复制到 `%USERPROFILE%\Downloads\Inkwell\` 并在结尾提示；
@@ -202,6 +210,7 @@ myEpubReader/                     # 仓库目录（应用名是 Inkwell，二者
 | 阶段 1：MVP 阅读器 | ✅ 完成，**用户已验收通过** |
 | 阶段 2：中文化 + 批注 + 搜索 | 🔄 进行中：中文排版 ✅、批注 ✅（高亮/笔记/书签/导出）、Android 真机适配 ✅；中文字体 / 简繁转换 / 全文搜索待做 |
 | **0.2.0 增强批次** | ✅ **已实现**（App 白天/夜间、双击工具栏、页号角标、页边距修复、PDF 阅读）—— 见 `docs/BACKLOG.md` §2.6 与 `docs/REQUIREMENTS-2026-10-05.md` §八 |
+| **0.2.2 打开方式** | ✅ **已实现**（双击 / 「打开方式 → 砚池」epub 直接进阅读器；Android 打开+分享）—— 见 `docs/BACKLOG.md` §2.8 与 `docs/REQUIREMENTS-2026-10-10-open-file.md`。⚠️ Android 真机未验 |
 | 阶段 3 及以后 | ⏸️ 未开始 |
 
 **阶段 1 已交付的能力**：书库（导入/封面/搜索/排序/删除）、阅读器
@@ -224,14 +233,23 @@ myEpubReader/                     # 仓库目录（应用名是 Inkwell，二者
 > ✅ 上面四条已于 **2026-09-20 在真机（Redmi K90）验收通过** ——
 > 安卓端至此才算真的能用。后续改 Android 相关代码时，别把这三类问题改回去。
 
+**0.2.2 已交付**：
+
+- **打开方式** —— 双击 / 「打开方式 → 砚池」epub：导入后直接进阅读器；已在库的书跳到那一本
+  并**续读上次位置**；应用在跑时再双击是**新开窗口**（多实例写库靠 `busy_timeout` 兜住）；
+  Android 同时接「打开」（`ACTION_VIEW`）与「分享」（`ACTION_SEND`）（§2.8）
+
 **实测产物**（`personal/out/` 下有副本）：
 
 | 产物 | 路径 | 大小 |
 | --- | --- | --- |
-| **Windows 安装包（0.2.0）** | `src-tauri/target/release/bundle/nsis/Inkwell_0.2.0_x64-setup.exe` | **6.09 MB** |
-| **Android APK（0.2.0，arm64，手机用）** | `src-tauri/gen/android/app/build/outputs/apk/arm64/release/app-arm64-release.apk` | **14.0 MB** |
-| **Android APK（0.2.0，universal，全架构）** | 同上目录 `universal/release/` | **47.6 MB** |
-| （历史）0.1.0 / 0.1.1 的包 | 见 `personal/out/` | 2.7 / 10.5 / 33.8 MB |
+| **Windows 安装包（0.2.2）** | `personal/out/Inkwell-0.2.2-win-x64-setup.exe` | **6.39 MB** |
+| **Android APK（0.2.2，arm64，手机用）** | `personal/out/Inkwell-0.2.2-arm64.apk` | **14.7 MB** |
+| **Android APK（0.2.2，universal，全架构）** | `personal/out/Inkwell-0.2.2-universal.apk` | **50.0 MB** |
+| （历史）0.2.0 / 0.1.1 / 0.1.0 的包 | 见 `personal/out/` | 6.09 / 14.0 / 47.6 MB 等 |
+
+> 0.2.2 的分发副本已放到 `%USERPROFILE%\Downloads\Inkwell\`（给人装的那一份；
+> **别给仓库 `personal/out/` 里的** —— 沙箱按镜像位置限制写入，装了会假成功，见 §3）。
 
 > 0.2.0 变大的原因是 PDF 资源进了产物（`dist/pdfjs/`，12.4 MB 原始文件）——
 > 详见 `docs/BACKLOG.md` §2.6 ⑤。
@@ -324,6 +342,12 @@ node personal/scripts/cdp.mjs "document.querySelector('footer input[type=range]'
 > ```
 > 
 > ⚠️ 子进程会随 pwsh 会话结束被回收，必须用后台作业让应用常驻，否则 CDP 连不上。
+>
+> ⚠️ **两个实例共用同一个 WebView2 浏览器进程**（0.2.2 实测）：只有**先启动**那个的
+> `--remote-debugging-port` 真正在监听，后启动的实例在调试端口上**根本查不到**
+> （但它的窗口是好的、功能也正常）—— 别把这个假象当成「第二个实例起不来」。
+> 要观察后启动的实例：先杀掉先启动的那个，或者直接看它的日志
+> （`{数据目录}\logs\inkwell.log`）。
 
 ---
 
