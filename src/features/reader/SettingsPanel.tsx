@@ -1,4 +1,6 @@
 import {
+  BOOKMARK_COLORS,
+  type BookmarkColorName,
   CJK_MODE_CHOICES,
   type FlowMode,
   FONT_CHOICES,
@@ -6,6 +8,14 @@ import {
   THEMES,
   type ThemeKey,
 } from '@/features/reader/engine/types';
+
+/** 书签颜色的中文名，只用于这个面板。 */
+const BOOKMARK_COLOR_LABELS: Record<BookmarkColorName, string> = {
+  red: '红',
+  blue: '蓝',
+  green: '绿',
+  amber: '琥珀',
+};
 
 interface Props {
   settings: RendererSettings;
@@ -142,6 +152,33 @@ export default function SettingsPanel({ settings, onChange, onReset, onClose }: 
                     style={{ background: t.bg }}
                   />
                   {t.name}
+                </button>
+              );
+            })}
+          </div>
+        </Row>
+
+        <Row label="书签颜色">
+          <div className="flex gap-1.5">
+            {(Object.keys(BOOKMARK_COLORS) as BookmarkColorName[]).map((c) => {
+              const active = settings.bookmarkColor === c;
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  title={`书签颜色：${BOOKMARK_COLOR_LABELS[c]}`}
+                  onClick={() => onChange({ bookmarkColor: c })}
+                  className={`cursor-pointer rounded border px-1.5 py-1 transition ${
+                    active ? 'border-amber-500/70' : 'border-app-border hover:border-app-muted'
+                  }`}
+                >
+                  <span
+                    className="mr-1 inline-block h-3 w-3 rounded-sm align-middle ring-1 ring-black/20"
+                    style={{ background: BOOKMARK_COLORS[c] }}
+                  />
+                  <span className={active ? 'text-app-accent' : 'text-app-muted'}>
+                    {BOOKMARK_COLOR_LABELS[c]}
+                  </span>
                 </button>
               );
             })}

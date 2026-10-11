@@ -9,6 +9,8 @@
 //!   不用迁移已有数据。
 //! - `cfi` 对高亮是一个 range（`epubcfi(/6/4!/4/2,/1:0,/1:12)`），对书签是一个点。
 //!   两种都由 foliate-js 的 `view.getCFI(index, range)` 产出。
+//! - `layout` 只对书签有意义：记下创建时的「单栏 / 双栏」，两种布局的书签互不显示
+//!   （REQ-2026-10-11-06）。高亮一律 `single`。
 
 use crate::error::{Error, Result};
 use rusqlite::{params, Connection};
@@ -19,6 +21,9 @@ pub const KINDS: [&str; 2] = ["highlight", "bookmark"];
 
 /// 允许的高亮色名。前端负责把色名映射成具体色值。
 pub const COLORS: [&str; 4] = ["yellow", "green", "blue", "pink"];
+
+/// 允许的布局标记（只用于书签）。
+pub const LAYOUTS: [&str; 2] = ["single", "double"];
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,13 +38,15 @@ pub struct Annotation {
     pub text: Option<String>,
     pub note: Option<String>,
     pub color: Option<String>,
+    /// 书签创建时的布局（single / double）；高亮恒为 single
+    pub layout: String,
     /// 所在章节标题，列表里分组用
     pub chapter: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
 
-const SELECT_ANN: &str = "SELECT id, book_id, type, cfi, text, note, color, chapter, \
+const SELECT_ANN: &str = "SELECT id, book_id, type, cfi, text, note, color, layout, chapter, \
     created_at, updated_at FROM annotations";
 
 fn row_to_annotation(row: &rusqlite::Row) -> rusqlite::Result<Annotation> {
@@ -51,6 +58,10 @@ fn row_to_annotation(row: &rusqlite::Row) -> rusqlite::Result<Annotation> {
         text: row.get("text")?,
         note: row.get("note")?,
         color: row.get("color")?,
+        // v2 之前的历史行在 ALTER 后已由 DEFAULT 填成 single，这里再兜一层 NULL。
+        layout: row
+            .get::<_, Option<String>>("layout")?
+            .unwrap_or_else(|| "single".into()),
         chapter: row.get("chapter")?,
         // 这两列理论上非空，但历史数据里出现 NULL 不该让整个列表崩掉。
         created_at: row.get::<_, Option<i64>>("created_at")?.unwrap_or(0),
@@ -87,6 +98,7 @@ pub fn add(
     note: Option<&str>,
     color: Option<&str>,
     chapter: Option<&str>,
+    layout: Option<&str>,
 ) -> Result<Annotation> {
     if !KINDS.contains(&kind) {
         return Err(Error::Other(format!("未知的批注类型：{kind}")));
@@ -94,6 +106,11 @@ pub fn add(
     if let Some(c) = color {
         if !COLORS.contains(&c) {
             return Err(Error::Other(format!("未知的高亮颜色：{c}")));
+        }
+    }
+    if let Some(l) = layout {
+        if !LAYOUTS.contains(&l) {
+            return Err(Error::Other(format!("未知的布局标记：{l}")));
         }
     }
     if cfi.trim().is_empty() {
@@ -104,9 +121,20 @@ pub fn add(
     let ts = crate::library::now_secs();
     conn.execute(
         "INSERT INTO annotations
-            (id, book_id, type, cfi, text, note, color, chapter, created_at, updated_at)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?9)",
-        params![id, book_id, kind, cfi, text, note, color, chapter, ts],
+            (id, book_id, type, cfi, text, note, color, chapter, layout, created_at, updated_at)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?10)",
+        params![
+            id,
+            book_id,
+            kind,
+            cfi,
+            text,
+            note,
+            color,
+            chapter,
+            layout.unwrap_or("single"),
+            ts
+        ],
     )?;
 
     get(conn, &id)?.ok_or_else(|| Error::Other("新增批注后未能读回记录".into()))
@@ -201,7 +229,7 @@ mod tests {
     fn mem_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
-        conn.execute_batch(db::MIGRATIONS_FOR_TEST).unwrap();
+        conn.execute_batch(&db::migrations_for_test()).unwrap();
         conn.execute(
             "INSERT INTO books (id,title,format,file_path,added_at,updated_at)
              VALUES ('b','书名','epub','a.epub',0,0)",
@@ -223,10 +251,12 @@ mod tests {
             None,
             Some("yellow"),
             Some("第一章"),
+            Some("single"),
         )
         .expect("新增应当成功");
         assert_eq!(a.kind, "highlight");
         assert_eq!(a.color.as_deref(), Some("yellow"));
+        assert_eq!(a.layout, "single");
 
         assert_eq!(list(&conn, "b").unwrap().len(), 1);
 
@@ -251,6 +281,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
         .unwrap_err()
         .to_string();
@@ -264,6 +295,7 @@ mod tests {
             None,
             None,
             Some("rainbow"),
+            None,
             None,
         )
         .unwrap_err()
@@ -290,6 +322,7 @@ mod tests {
             None,
             None,
             None,
+            None,
         )
         .unwrap();
         conn.execute("DELETE FROM books WHERE id = 'b'", [])
@@ -309,6 +342,7 @@ mod tests {
             Some("笔记"),
             Some("yellow"),
             Some("第一章"),
+            Some("single"),
         )
         .unwrap();
         add(
@@ -320,6 +354,7 @@ mod tests {
             None,
             None,
             Some("第二章"),
+            Some("double"),
         )
         .unwrap();
 
@@ -330,5 +365,53 @@ mod tests {
         assert!(md.contains("🔖 书签"), "{md}");
         // 原文里的 * 必须被转义，否则会变成斜体
         assert!(md.contains("\\*重点\\*"), "转义失效: {md}");
+    }
+
+    #[test]
+    fn layout_defaults_to_single_and_is_validated() {
+        let conn = mem_db();
+        // 不传 layout 的书签（老前端 / 历史数据路径）应落成单栏
+        let a = add(
+            &conn,
+            "b",
+            "bookmark",
+            "epubcfi(/6/4)",
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(a.layout, "single", "不传 layout 应落成单栏");
+
+        let b = add(
+            &conn,
+            "b",
+            "bookmark",
+            "epubcfi(/6/6)",
+            None,
+            None,
+            None,
+            None,
+            Some("double"),
+        )
+        .unwrap();
+        assert_eq!(b.layout, "double");
+
+        let err = add(
+            &conn,
+            "b",
+            "bookmark",
+            "epubcfi(/6/8)",
+            None,
+            None,
+            None,
+            None,
+            Some("triple"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("未知的布局标记"), "实际: {err}");
     }
 }

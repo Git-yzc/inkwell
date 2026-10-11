@@ -54,3 +54,17 @@
 html {
   background-color: var(--app-bg);
 }
+
+/* ─────── 页上书签缎带出现动画（REQ-2026-10-11-04）───────
+   挂在 Reader 的缎带元素上：加书签时从页顶端滑下来，像插进书页的一枚书签。
+   删除时不播（直接消失），与需求一致。 */
+@keyframes bookmark-drop {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}

@@ -4,8 +4,9 @@ import { useNavigate, useParams } from 'react-router-dom';
 import AppThemeToggle from '@/components/AppThemeToggle';
 import AnnotationEditor, { type EditorTarget } from '@/features/annotation/AnnotationEditor';
 import AnnotationPanel, { type AnnotationTab } from '@/features/annotation/AnnotationPanel';
-import { ReaderEngine } from '@/features/reader/engine';
+import { PULL_TRIGGER_PX, ReaderEngine } from '@/features/reader/engine';
 import {
+  BOOKMARK_COLORS,
   type BookInfo,
   type HighlightView,
   type RendererSettings,
@@ -16,6 +17,7 @@ import SettingsPanel from '@/features/reader/SettingsPanel';
 import TocPanel from '@/features/reader/TocPanel';
 import {
   type Annotation,
+  type AnnotationLayout,
   api,
   type Book,
   type ExportFormat,
@@ -88,8 +90,26 @@ export default function Reader() {
   const [editor, setEditor] = useState<EditorTarget | null>(null);
   const [annotationBusy, setAnnotationBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
-  /** 下拉手势进度：true 已过触发线 / false 还在拉 / null 没在拉 */
-  const [pull, setPull] = useState<boolean | null>(null);
+  /** 下拉手势：已下拉的**原始**像素（0 = 没在拉）。阻尼与回弹在这里算。 */
+  const [pullRaw, setPullRaw] = useState(0);
+  /** 松手回弹中：给页面加 transition；拖动时必须跟手，所以平时没有过渡。 */
+  const [pullSettling, setPullSettling] = useState(false);
+  /** 上一帧的下拉位移：判断「是不是刚从拉动变成松手」 */
+  const pullRawRef = useRef(0);
+  const handlePullProgress = useCallback((offset: number) => {
+    const prev = pullRawRef.current;
+    pullRawRef.current = offset;
+    if (offset > 0) {
+      setPullSettling(false);
+      setPullRaw(offset);
+      return;
+    }
+    if (prev > 0) {
+      setPullRaw(0);
+      setPullSettling(true);
+      window.setTimeout(() => setPullSettling(false), 320);
+    }
+  }, []);
   /** 一次性操作反馈（加 / 去书签） */
   const [toast, setToast] = useState<string | null>(null);
 
@@ -213,7 +233,7 @@ export default function Reader() {
     });
 
     // 下拉手势：过线后松手就切换当前页的书签
-    const offPullProgress = engine.onPullProgress(setPull);
+    const offPullProgress = engine.onPullProgress(handlePullProgress);
     const offPullTrigger = engine.onPullTrigger(() => {
       void toggleBookmarkRef.current();
     });
@@ -254,7 +274,7 @@ export default function Reader() {
       engine.close();
       engineRef.current = null;
     };
-  }, [book]);
+  }, [book, handlePullProgress]);
 
   // ---- 载入这本书的批注 ----
   useEffect(() => {
@@ -445,12 +465,25 @@ export default function Reader() {
 
   const toc = useMemo(() => info?.toc ?? [], [info]);
 
-  /** 当前页有没有书签。 */
+  /** 当前布局：书签按它隔离，单栏的不会在双栏里显示（REQ-2026-10-11-06）。 */
+  const layout: AnnotationLayout = settings.maxColumnCount >= 2 ? 'double' : 'single';
+
+  /** 当前页有没有**本布局**的书签。 */
   const bookmarkHere =
-    currentCfi !== null && annotations.some((a) => a.type === 'bookmark' && a.cfi === currentCfi);
+    currentCfi !== null &&
+    annotations.some((a) => a.type === 'bookmark' && a.cfi === currentCfi && a.layout === layout);
 
   /** 批注（高亮/笔记）条数。顶栏「批注」按钮只数批注，书签已分出去（REQ-2026-10-11-07）。 */
   const highlightCount = annotations.filter((a) => a.type === 'highlight').length;
+
+  /** 下拉阻尼：跟手但不 1:1；上限 150px，免得拉到底整页飞出屏幕。 */
+  const pullDamped = Math.min(pullRaw * 0.55, 150);
+  const pullArmed = pullRaw >= PULL_TRIGGER_PX;
+  /** 本页已有书签时下拉是「删除」，提示文案要跟着变（REQ-2026-10-11-05） */
+  const pullAction = bookmarkHere ? '删除' : '添加';
+
+  /** 缎带只在「翻页」模式出现：滚动模式没有「页」，B10 定案不管它（不显示、不响应手势）。 */
+  const showRibbon = bookmarkHere && settings.flow === 'paginated';
 
   function handleTocSelect(item: TocItem) {
     setShowToc(false);
@@ -543,8 +576,11 @@ export default function Reader() {
     const { cfi, chapter: ch } = lastLocRef.current;
     if (!cfi) return;
 
-    // 读 ref 而不是 state：下拉手势的回调只注册一次，闭包里的 annotations 会是旧值
-    const existing = annotationsRef.current.find((a) => a.type === 'bookmark' && a.cfi === cfi);
+    // 读 ref 而不是 state：下拉手势的回调只注册一次，闭包里的 annotations 会是旧值。
+    // 只看**当前布局**的书签：单栏的在双栏里不算「已加」，反过来也一样（REQ-2026-10-11-06）。
+    const existing = annotationsRef.current.find(
+      (a) => a.type === 'bookmark' && a.cfi === cfi && a.layout === layout,
+    );
     if (existing) {
       await handleAnnotationDelete(existing);
       setToast('已去掉书签');
@@ -557,6 +593,7 @@ export default function Reader() {
         kind: 'bookmark',
         cfi,
         chapter: ch,
+        layout,
       });
       setAnnotations((list) => [created, ...list]);
       setToast('已加书签 ★');
@@ -678,9 +715,50 @@ export default function Reader() {
         <AppThemeToggle compact />
       </header>
 
-      {/* 正文区 */}
-      <div className="relative min-h-0 flex-1">
-        <div ref={hostRef} className="h-full w-full" />
+      {/* 正文区。overflow-hidden：下拉时页面移出上边，不溢出到顶栏 / 底栏 */}
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        {/* 下拉提示：平时被页面盖住，下拉才露出顶部灰区 + 一行字（REQ-2026-10-11-05） */}
+        {pullRaw > 0 && (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0"
+            style={{ background: `${theme.muted}1f` }}
+          >
+            <p
+              className="mt-5 text-center text-xs transition-opacity duration-150"
+              style={{ color: theme.muted, opacity: pullDamped >= 40 ? 1 : 0 }}
+            >
+              {pullArmed ? `↑ 松手${pullAction}书签` : `↓ 继续下拉${pullAction}书签`}
+            </p>
+          </div>
+        )}
+
+        {/* 页面：下拉时整块跟着走（只动正文，顶栏 / 底栏不动） */}
+        <div
+          className="absolute inset-0"
+          style={{
+            transform: `translateY(${pullDamped}px)`,
+            transition: pullSettling ? 'transform 300ms cubic-bezier(0.22, 0.61, 0.36, 1)' : 'none',
+          }}
+        >
+          <div ref={hostRef} className="h-full w-full" />
+
+          {/* 页上书签缎带（REQ-2026-10-11-04）：仅展示、不可点，跳转走侧栏书签列表 */}
+          {showRibbon && error === null && (
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute top-0 right-0 z-[12]"
+              style={{
+                width: 20,
+                height: 34,
+                background: BOOKMARK_COLORS[settings.bookmarkColor],
+                clipPath: 'polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%)',
+                filter: 'drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35))',
+                animation: 'bookmark-drop 320ms cubic-bezier(0.22, 0.61, 0.36, 1)',
+              }}
+            />
+          )}
+        </div>
 
         {loading && (
           <div className="absolute inset-0 flex items-center justify-center">
@@ -704,8 +782,8 @@ export default function Reader() {
           </div>
         )}
 
-        {/* 下拉加书签的实时提示 / 操作反馈 */}
-        {(pull !== null || toast !== null) && (
+        {/* 加 / 去书签的一次性反馈 */}
+        {toast !== null && (
           <div className="pointer-events-none absolute inset-x-0 top-3 z-30 flex justify-center">
             <span
               className="rounded-full border px-3 py-1 text-xs backdrop-blur"
@@ -715,7 +793,7 @@ export default function Reader() {
                 color: theme.fg,
               }}
             >
-              {toast ?? (pull === true ? '松手加书签 ★' : '↓ 继续下拉加书签')}
+              {toast}
             </span>
           </div>
         )}

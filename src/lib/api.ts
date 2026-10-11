@@ -52,6 +52,14 @@ export type AnnotationKind = 'highlight' | 'bookmark';
 /** 高亮色名。色值由前端映射，库里只存色名（见 annotation.rs 的说明）。 */
 export type HighlightColor = 'yellow' | 'green' | 'blue' | 'pink';
 
+/**
+ * 书签的布局标记（REQ-2026-10-11-06）。
+ *
+ * 单栏 / 双栏的书签**互不显示**：书签记录创建时的布局，读取时按当前布局过滤。
+ * 历史书签由迁移 v2 的 DEFAULT 落成 `single`。
+ */
+export type AnnotationLayout = 'single' | 'double';
+
 export interface Annotation {
   id: string;
   bookId: string;
@@ -62,6 +70,8 @@ export interface Annotation {
   text: string | null;
   note: string | null;
   color: HighlightColor | null;
+  /** 书签创建时的布局；高亮恒为 single（见 annotation.rs） */
+  layout: AnnotationLayout;
   /** 所在章节标题 */
   chapter: string | null;
   createdAt: number;
@@ -107,6 +117,7 @@ export const api = {
     note?: string | null;
     color?: HighlightColor | null;
     chapter?: string | null;
+    layout?: AnnotationLayout;
   }) => invoke<Annotation>('add_annotation', input),
   updateAnnotation: (id: string, note: string | null, color: HighlightColor | null) =>
     invoke<void>('update_annotation', { id, note, color }),

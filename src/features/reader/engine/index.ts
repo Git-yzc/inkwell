@@ -51,12 +51,13 @@ type LoadListener = (e: { index: number }) => void;
 type SelectionListener = (sel: SelectionInfo | null) => void;
 type AnnotationClickListener = (cfi: string) => void;
 /**
- * 下拉进度。
- * - `true`：已过触发线，松手就生效
- * - `false`：正在下拉，还没到线
- * - `null`：没有进行中的手势
+ * 下拉进度（给 UI 做「整页跟手」用）。
+ * - `0`：没有进行中的手势
+ * - `> 0`：当前已下拉的**原始**像素数（阻尼 / 回弹由 UI 侧施加）
+ *
+ * UI 要判断「有没有过触发线」时，拿它与 `PULL_TRIGGER_PX` 比即可，判据与这里一致。
  */
-type PullProgressListener = (armed: boolean | null) => void;
+type PullProgressListener = (offset: number) => void;
 /** 下拉到触发线后松手。 */
 type PullTriggerListener = () => void;
 /** 正文中间区域被双击（Android 上用来切换上下工具栏，见 REQ-2026-10-05-01）。 */
@@ -72,9 +73,9 @@ interface DrawAnnotationDetail {
 const SELECTION_DEBOUNCE_MS = 150;
 
 /** 下拉多少像素开始给提示（还没到触发线）。 */
-const PULL_HINT_PX = 36;
+export const PULL_HINT_PX = 36;
 /** 下拉多少像素算「要加书签」——松手即触发。 */
-const PULL_TRIGGER_PX = 96;
+export const PULL_TRIGGER_PX = 96;
 /** 竖直位移至少是水平位移的多少倍才算「下拉」而不是横向滑动。 */
 const PULL_VERTICAL_RATIO = 1.6;
 
@@ -634,7 +635,7 @@ export class ReaderEngine {
 
   /* ------------------------------------------------------------ 下拉手势 */
 
-  /** 下拉进度（用于显示提示）。 */
+  /** 下拉进度：回调参数是已下拉的原始像素数（0 = 没在拉）。 */
   onPullProgress(fn: PullProgressListener): () => void {
     this.#pullProgressListeners.add(fn);
     return () => this.#pullProgressListeners.delete(fn);
@@ -685,14 +686,13 @@ export class ReaderEngine {
   #resetPull(): void {
     this.#pullStart = null;
     this.#pullFired = false;
-    this.#setPullPhase('idle');
+    this.#pullPhase = 'idle';
+    this.#emitPull(0);
   }
 
-  #setPullPhase(phase: 'idle' | 'pulling' | 'armed'): void {
-    if (phase === this.#pullPhase) return;
-    this.#pullPhase = phase;
-    const value = phase === 'idle' ? null : phase === 'armed';
-    for (const fn of this.#pullProgressListeners) fn(value);
+  /** 把当前下拉的原始位移发给 UI（0 = 没有手势）。阻尼与回弹由 UI 侧施加。 */
+  #emitPull(offset: number): void {
+    for (const fn of this.#pullProgressListeners) fn(offset);
   }
 
   #onPullStart = (e: TouchEvent): void => {
@@ -701,6 +701,8 @@ export class ReaderEngine {
     if (!t) return;
     this.#pullStart = { x: t.clientX, y: t.clientY };
     this.#pullFired = false;
+    this.#pullPhase = 'idle';
+    this.#emitPull(0);
   };
 
   #onPullMove = (e: TouchEvent): void => {
@@ -712,7 +714,8 @@ export class ReaderEngine {
 
     // 正在选词：用户拖的是选择手柄，不是下拉
     if (this.#selectionDoc?.defaultView?.getSelection()?.isCollapsed === false) {
-      this.#setPullPhase('idle');
+      this.#pullPhase = 'idle';
+      this.#emitPull(0);
       return;
     }
 
@@ -721,18 +724,22 @@ export class ReaderEngine {
 
     // 往上拖、或横向为主的滑动，都不算这个手势
     if (dy < PULL_HINT_PX || dy < dx * PULL_VERTICAL_RATIO) {
-      this.#setPullPhase('idle');
+      this.#pullPhase = 'idle';
+      this.#emitPull(0);
       return;
     }
 
-    this.#setPullPhase(dy >= PULL_TRIGGER_PX ? 'armed' : 'pulling');
+    this.#pullPhase = dy >= PULL_TRIGGER_PX ? 'armed' : 'pulling';
+    this.#emitPull(dy);
   };
 
   #onPullEnd = (): void => {
     const fire = this.#pullPhase === 'armed' && !this.#pullFired;
     this.#pullStart = null;
     this.#pullFired = true;
-    this.#setPullPhase('idle');
+    this.#pullPhase = 'idle';
+    // 先让 UI 回弹，再触发增删；两者互不依赖
+    this.#emitPull(0);
     if (fire) for (const fn of this.#pullTriggerListeners) fn();
   };
 

@@ -73,6 +73,8 @@ export interface RendererSettings {
   maxColumnCount: number;
   /** 中文排版（首行缩进、行首禁则、中西文间距） */
   cjkTypography: CjkMode;
+  /** 页上书签图案的颜色（固定色，不随阅读主题变色，见 REQ-2026-10-11-04） */
+  bookmarkColor: BookmarkColorName;
 }
 
 export const DEFAULT_SETTINGS: RendererSettings = {
@@ -84,6 +86,7 @@ export const DEFAULT_SETTINGS: RendererSettings = {
   flow: 'paginated',
   maxColumnCount: 1,
   cjkTypography: 'auto',
+  bookmarkColor: 'blue',
 };
 
 /**
@@ -128,6 +131,22 @@ export const HIGHLIGHT_COLORS = {
 } as const;
 
 export type HighlightColorName = keyof typeof HIGHLIGHT_COLORS;
+
+/**
+ * 页上书签图案的颜色（REQ-2026-10-11-04 的 B4）。
+ *
+ * 四个**固定色**，不随阅读主题变色；取值时都核对过与三种阅读主题底色
+ * （浅色 / 羊皮纸 / 深色）的对比 —— 尤其**琥珀特意取得偏深**，
+ * 别改成亮黄，否则在羊皮纸底色上会糊成一片。
+ */
+export const BOOKMARK_COLORS = {
+  red: '#c0392b',
+  blue: '#2f6fd0',
+  green: '#2f9e6b',
+  amber: '#a5641a',
+} as const;
+
+export type BookmarkColorName = keyof typeof BOOKMARK_COLORS;
 
 /** 色名 → 色值；未知色名回落到黄色（库里的旧数据或将来加的颜色都可能对不上）。 */
 export function highlightColor(name: string | null | undefined): string {

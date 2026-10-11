@@ -8,8 +8,13 @@ use rusqlite::Connection;
 use std::path::Path;
 
 /// 供其它模块的测试搭内存库用。
+///
+/// 必须把**所有**迁移拼起来跑，不能只跑 v1 —— 后面的迁移加了列，
+/// 只跑 v1 的话测试里插入新列会失败（v2 加 `layout` 时就踩到这个点）。
 #[cfg(test)]
-pub const MIGRATIONS_FOR_TEST: &str = MIGRATIONS[0];
+pub fn migrations_for_test() -> String {
+    MIGRATIONS.join("\n")
+}
 
 /// 迁移列表。**只允许在末尾追加**，已发布的迁移不可修改。
 const MIGRATIONS: &[&str] = &[
@@ -80,6 +85,11 @@ const MIGRATIONS: &[&str] = &[
         key   TEXT PRIMARY KEY,
         value TEXT NOT NULL
     );
+    "#,
+    // v2：书签按「单栏 / 双栏」隔离（REQ-2026-10-11-06）。
+    // 只对书签有意义；历史行由 DEFAULT 落成单栏，正好符合 B1 的定案。
+    r#"
+    ALTER TABLE annotations ADD COLUMN layout TEXT NOT NULL DEFAULT 'single';
     "#,
 ];
 

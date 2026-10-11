@@ -381,7 +381,7 @@ mod tests {
     fn mem_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
-        conn.execute_batch(crate::db::MIGRATIONS_FOR_TEST).unwrap();
+        conn.execute_batch(&crate::db::migrations_for_test()).unwrap();
         conn
     }
 

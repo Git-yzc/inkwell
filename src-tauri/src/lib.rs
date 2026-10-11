@@ -471,7 +471,8 @@ fn list_annotations(
     annotation::list(&conn, &book_id)
 }
 
-/// 新增批注。`kind` 为 highlight / bookmark，`color` 为色名。
+/// 新增批注。`kind` 为 highlight / bookmark，`color` 为色名，
+/// `layout` 为书签创建时的单栏 / 双栏（不传按 single 处理）。
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 fn add_annotation(
@@ -483,6 +484,7 @@ fn add_annotation(
     note: Option<String>,
     color: Option<String>,
     chapter: Option<String>,
+    layout: Option<String>,
 ) -> Result<annotation::Annotation> {
     let conn = state
         .conn
@@ -497,6 +499,7 @@ fn add_annotation(
         note.as_deref(),
         color.as_deref(),
         chapter.as_deref(),
+        layout.as_deref(),
     )
 }
 
