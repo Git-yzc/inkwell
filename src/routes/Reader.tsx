@@ -34,12 +34,21 @@ const PROGRESS_SAVE_MS = 1200;
 /** 工具栏无操作多久后自动隐藏（毫秒）。 */
 const BAR_HIDE_MS = 4000;
 
-/**
- * 页上书签缎带离正文区右边缘的距离（px）。
- *
- * 贴在最右边会显得像贴在窗口上、而不是贴在书页上，所以留一点内缩。
- */
+/** 顶栏高度（px）。顶栏显隐都用它，缎带也挂在同一条带子里。 */
+const TOP_BAR_HEIGHT = 48;
+
+/** 页上书签缎带离右边缘的距离（px）：贴死会显得贴在窗口上，留一点内缩。 */
 const RIBBON_INSET_PX = 14;
+
+/**
+ * 缎带长度（px）。
+ *
+ * 缎带**从屏幕最上方挂下来**，整条落在顶栏那条带子里（真机反馈要的样子）：
+ * - 顶栏隐藏时（opacity 0，但仍然占位）能看见它；
+ * - 顶栏一显示就是**不透明**的、z 又比缎带高，直接把整条盖住；
+ * - 因为它在顶栏高度内，**永远碰不到正文**，跟「页边距」设置无关。
+ */
+const RIBBON_HEIGHT_PX = TOP_BAR_HEIGHT - 4;
 
 export default function Reader() {
   const { id } = useParams<{ id: string }>();
@@ -492,15 +501,6 @@ export default function Reader() {
   /** 缎带只在「翻页」模式出现：滚动模式没有「页」，B10 定案不管它（不显示、不响应手势）。 */
   const showRibbon = bookmarkHere && settings.flow === 'paginated';
 
-  /**
-   * 缎带的高度：按「页边距」缩放，保证整条落在页面的**上边距**里、不压正文。
-   *
-   * 内核把正文框的顶部至少留出 `margin`（见 paginator 的 `grid-template-rows`），
-   * 所以高度只要 ≤ margin 就一定不会盖住文字。用户把页边距调小，缎带跟着变短
-   * ——真机反馈过「缎带压在正文上」，就是固定 34px 在页边距小的机器上撞出来的。
-   */
-  const ribbonHeight = Math.max(12, Math.min(26, settings.margin - 10));
-
   function handleTocSelect(item: TocItem) {
     setShowToc(false);
     if (item.href) void engineRef.current?.goTo(item.href);
@@ -664,7 +664,7 @@ export default function Reader() {
       <header
         className="z-20 flex shrink-0 items-center gap-3 border-b border-app-border bg-app-surface px-4 text-app-muted transition-opacity duration-300"
         style={{
-          height: 48,
+          height: TOP_BAR_HEIGHT,
           opacity: barVisible ? 1 : 0,
           pointerEvents: barVisible ? 'auto' : 'none',
         }}
@@ -731,6 +731,27 @@ export default function Reader() {
         <AppThemeToggle compact />
       </header>
 
+      {/* 页上书签缎带（REQ-2026-10-11-04）：**从屏幕最上方挂下来**，整条落在顶栏那条带子里。
+          - 顶栏隐藏（opacity 0）时能看见它；顶栏一显示就把它**整条盖住**（顶栏不透明、z 更高）。
+          - 高度不超过顶栏，所以**永远碰不到正文**，与「页边距」设置无关。
+          - 仅展示、不可点；跳转走侧栏的书签列表。 */}
+      {showRibbon && error === null && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute z-[15]"
+          style={{
+            top: 0,
+            right: RIBBON_INSET_PX,
+            width: 18,
+            height: RIBBON_HEIGHT_PX,
+            background: BOOKMARK_COLORS[settings.bookmarkColor],
+            clipPath: 'polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%)',
+            filter: 'drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35))',
+            animation: 'bookmark-drop 320ms cubic-bezier(0.22, 0.61, 0.36, 1)',
+          }}
+        />
+      )}
+
       {/* 正文区。overflow-hidden：下拉时页面移出上边，不溢出到顶栏 / 底栏 */}
       <div className="relative min-h-0 flex-1 overflow-hidden">
         {/* 下拉提示：平时被页面盖住，下拉才露出顶部灰区 + 一行字（REQ-2026-10-11-05） */}
@@ -758,24 +779,6 @@ export default function Reader() {
           }}
         >
           <div ref={hostRef} className="h-full w-full" />
-
-          {/* 页上书签缎带（REQ-2026-10-11-04）：仅展示、不可点，跳转走侧栏书签列表 */}
-          {showRibbon && error === null && (
-            <span
-              aria-hidden="true"
-              className="pointer-events-none absolute z-[12]"
-              style={{
-                top: 2,
-                right: RIBBON_INSET_PX,
-                width: 18,
-                height: ribbonHeight,
-                background: BOOKMARK_COLORS[settings.bookmarkColor],
-                clipPath: 'polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%)',
-                filter: 'drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35))',
-                animation: 'bookmark-drop 320ms cubic-bezier(0.22, 0.61, 0.36, 1)',
-              }}
-            />
-          )}
         </div>
 
         {loading && (

@@ -807,25 +807,27 @@ WebDAV 或局域网 HTTP，同步阅读进度（CFI）、批注、设置。
 > • [页上书签图案 + 下拉手势 + 书签/批注拆分](REQUIREMENTS-2026-10-11-bookmark-indicator.md)（✅ 已实现）
 > • Windows 双页展示（❌ 已取消：即现有「分栏」）
 
-> 📦 **0.3.0 已发布（2026-10-11，同日因真机 bug 二次打包）**：GitHub Release
+> 📦 **0.3.0 已发布（2026-10-11，同日因真机反馈**三次打包**）**：GitHub Release
 > [`v0.3.0`](https://github.com/Git-yzc/inkwell/releases/tag/v0.3.0)，三个产物都已上传
-> （版本号不变，资产已用 `--clobber` 覆盖为**修复后**的新包）：
+> （版本号不变，资产用 `--clobber` 覆盖为**最新修复版**）：
 >
 > | 产物 | 大小 | SHA256 |
 > | --- | --- | --- |
-> | `Inkwell-0.3.0-win-x64-setup.exe` | 6.1 MB | `D083EE6357E337777FBDFE5DF063C05F996D36E9BD4946EACC6EC56AA78A45E7` |
-> | `Inkwell-0.3.0-arm64.apk` | 14.0 MB | `21443D50AD821073E87A9E0EFC4C8E71552C459FAE9D88F0DC47D3A937670A8C` |
-> | `Inkwell-0.3.0-universal.apk` | 47.7 MB | `FD6D4C8D5E2147C030B5F78927274322770CF7F77C3AE887B010AA4BF6D36004` |
+> | `Inkwell-0.3.0-win-x64-setup.exe` | 6.1 MB | `A292F0117455E4A2D6BD84CB9FE82309BB4F6473A608E3A963080659E4793A9F` |
+> | `Inkwell-0.3.0-arm64.apk` | 14.0 MB | `F572BCB6F2953979AF0865794DED33BFACD0818161B0C9F20BCDFFE37E68F3D1` |
+> | `Inkwell-0.3.0-universal.apk` | 47.7 MB | `674EA77677B31913F11E7BA44CF0C9B6EFC65E43023C6F740039AD0D4480C71D` |
 >
 > 含 **3 项已实现**的需求：书签与批注拆分、页上书签缎带 + 下拉手势（含 **DB 迁移 v2**）、
 > 章内页号角标。**不含**翻页动效（该需求已取消，代码已撤）。
 > `personal/out/` 有副本；给用户双击的安装包另在 `%USERPROFILE%\Downloads\Inkwell\`
 > （见 [AGENTS.md](../AGENTS.md) §3）。
 >
-> 🔁 **二次打包修的两个真机问题**（详见
-> [书签需求文档](REQUIREMENTS-2026-10-11-bookmark-indicator.md) §九「第二轮返工」）：
-> ① 缎带高度改为按页边距缩放，不再压住正文；
-> ② 下拉手势改到 **capture 阶段**并拦截内核的触摸处理，不再横向乱晃 / 误翻页。
+> 🔁 **真机反馈后的三次返工**（详见
+> [书签需求文档](REQUIREMENTS-2026-10-11-bookmark-indicator.md) §九）：
+> ① 缎带先是不躲正文 —— 改为**从屏幕最上方挂下来、整条落在顶栏带子里**，
+>   顶栏一显示就整条盖住它，与页边距解耦；
+> ② 下拉与内核的横向滑动/翻页抢手势、整页乱晃 —— 下拉监听改到 **capture 阶段**并拦截内核；
+> ③ 缎带右缘内缩 14px（原来贴死窗口边）。
 
 **页号角标改成「当前章节的进度」（REQ-2026-10-11-01，✅ 已实现）**
 
