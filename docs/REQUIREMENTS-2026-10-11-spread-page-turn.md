@@ -157,4 +157,48 @@
 | 2026-10-11 | D4 重启是否重置提醒 | **不重置**（持久化；只有关→开重置） |
 | 2026-10-11 | D5 PDF / 漫画 | **先不做**（不套翻纸） |
 | 2026-10-11 | D6 输入方式 | 触控 / 触控板有交互过程（Windows 也做手势）；鼠标自动播放 |
-| — | 待实现 | 需先做「快照 + 3D 卷页」spike 与掉帧判据 |
+
+---
+
+## 九、实现记录（✅ 已实现，2026-10-11）
+
+**改动**：
+
+| 文件 | 改动 |
+| --- | --- |
+| [`engine/types.ts`](../src/features/reader/engine/types.ts) | 新增 `PageTurnMode`（none/slide/curl）与 `RendererSettings.pageTurn`（**默认 none**） |
+| [`engine/index.ts`](../src/features/reader/engine/index.ts) | `next()/prev()` 统一走 `#turn()`（**加锁** + 动效）；`#playCurl()` 播翻纸；`#applyRendererAttributes()` 按档位设 / 摘内核 `animated`；动效期间用 rAF 监测掉帧，`onTurnStutter()` 上报 |
+| [`SettingsPanel.tsx`](../src/features/reader/SettingsPanel.tsx) | 「翻页动效」一行：**关 / 滑动 / 翻纸** |
+| [`Reader.tsx`](../src/routes/Reader.tsx) | 订阅掉帧 → 弹**一次性**提示（改滑动 / 知道了）；标记存 localStorage，**关→开**才重置、**重启不重置** |
+
+**与定案的两处偏差（重要）**：
+
+1. **没做成「从右下角卷起一页」**：真卷页要先把当前页**拍成位图**再对位图做形变，而正文在 iframe 里 ——
+   在不引入新依赖、也不改内核的前提下，WebView2 没有可用的 DOM 快照手段。
+   实现改为**整页绕竖直边的 3D 翻转 + 明暗变化**：下一页从右边缘翻出去（再从另一侧转回来），
+   上一页方向相反；换页发生在页面接近与视线平行时，观感上仍是「一页翻过去」。
+   > 要升级成真卷页，得先解决页快照（允许引一个截图库，或改内核让它暴露可变换的页面元素）。
+2. **触摸屏 / 触控板的「交互过程」（手指拖动跟手翻页）没做**：本轮翻页动效是**一次性播放**，
+   鼠标 / 触摸 / 滚轮 / 方向键一视同仁。触控板纵向手势与鼠标滚轮在 WebView2 里不可区分
+   （见 [书签需求文档](REQUIREMENTS-2026-10-11-bookmark-indicator.md) 的限制说明），跟手翻页要另立方案。
+
+**踩到并修掉的坑**：动效给 `foliate-view` 元素加 `rotateY` 之后，**内核正是用它量页面宽度**
+（`getBoundingClientRect()`）—— 转起来量到的是塌缩后的宽度，`pages`/`size` 全乱，
+页码与进度直接变成 **NaN**（角标从 `1 / 72` 变成 `NaN / 72 NaN%`）。
+修法：换页前先 `cancel()` 动画、清空 transform、**临时 `visibility:hidden`**，换完页再播第二段。
+
+**实测（CDP 驱动真实应用）**：
+
+| 用例 | 实测 |
+| --- | --- |
+| 三档位 | 设置里有「关 / 滑动 / 翻纸」 |
+| 滑动 | 内核渲染器 `renderer.hasAttribute('animated') === true` |
+| 翻纸 | `animated` 为 false；翻页中 `transformOrigin='right center'`、`getAnimations().length === 1` |
+| 翻纸后 | 页码 / 进度 / 角标都正常（NaN 已修），`transformOrigin` 已清空 |
+| 加锁 | 动效播放中连点两次「下一页」→ **只前进 1 页** |
+| 关档 | 连点两次也只前进 1 页（内核自身 ~100ms 锁，属既有行为） |
+
+**仍未做 / 未验**：
+- 触摸板横向双指滑动翻页（D6 的「触控板交互」）—— 见上面第 2 点。
+- Android 真机未验（本机没设备）。
+- PDF / 漫画不套动效（D5）。

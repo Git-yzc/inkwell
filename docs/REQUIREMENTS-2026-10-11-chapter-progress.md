@@ -131,3 +131,31 @@
 | 2026-10-11 | Q3 是否带章名 | **不带**（顶栏已有） |
 | 2026-10-11 | Q4 无分章回退 | **回退全书位置** |
 | 2026-10-11 | 版本号 | 本批需求定名 **0.3.0** |
+
+---
+
+## 八、实现记录（✅ 已实现，2026-10-11）
+
+**改动**（全在适配层，不动 submodule）：
+
+| 文件 | 改动 |
+| --- | --- |
+| [`engine/index.ts`](../src/features/reader/engine/index.ts) | `toLocation()` 增 `sections` 参数；新增 `SIZE_PER_LOC = 1500` 与 `sectionBytesAt()`，多分节时把 `positionCurrent/Total` 换成**章内**口径（`location.current - floor(本节起点/SIZE_PER_LOC) + 1`，总数 `ceil(本节 size / SIZE_PER_LOC)`） |
+| [`engine/types.ts`](../src/features/reader/engine/types.ts) | 更新 `positionCurrent/Total` 的语义说明（章内 / 单节回退 / 固定版式页码） |
+
+**关键点**：
+
+- 章的边界用内核 **spine 分节**（Q1 方案 A），每节的字节数取自内核 `book.sections[].size`（zip 条目在 open 时就有，不是估算）。
+- `SIZE_PER_LOC = 1500` 必须与内核 `view.js` 里 `new SectionProgress(book.sections, 1500, 1600)` 的第一个参数一致，
+  否则章内数字对不上 `location.current`。内核没暴露这个常量，所以在本文件里写死并注明来源。
+- **单节书与固定版式不换口径**（回退全书位置 / 页码，Q4 / D5）。
+- 百分比与进度条仍用 `fraction`，**一行都没动**。
+
+**实测（CDP 驱动真实应用，《毛泽东传(共6册)》第 189 节）**：
+
+| 项 | 实测 |
+| --- | --- |
+| 角标 | `1 / 72  48%` —— 位置是**章内**（本节共 72 屏），百分比仍是全书 48% |
+| 内核原始值 | `section 189/241`、`location 2117/4443`、`fraction 0.477` |
+| 翻一页后 | 角标 `6 / 72`（章内递增），百分比 48% 随全书走 |
+| 单节 / PDF | 走原分支（未换口径），代码路径未改 |
