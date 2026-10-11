@@ -17,11 +17,13 @@ export interface ReaderLocation {
   /** 当前章节标题，取不到则为 null */
   chapterLabel: string | null;
   /**
-   * 位置指示用的「当前 / 总数」（REQ-2026-10-05-02）。
+   * 位置指示用的「当前 / 总数」（REQ-2026-10-05-02，口径见 REQ-2026-10-11-01）。
    *
-   * 普通书籍取内核折算的**全书位置**（Kindle 式，见 progress.js 的 sizePerLoc）；
-   * 固定版式（PDF / 漫画）一页就是一节，改用**页码**更直观。
-   * 内核给不出时 total 为 0，UI 只显示百分比。
+   * - 多分节的普通书籍：**章内**位置（本章第几屏 / 本章共几屏），角标跟着当前章走；
+   * - 单节书：退化成全书位置（与改动前一致）；
+   * - 固定版式（PDF / 漫画）一页就是一节，用**页码**更直观。
+   *
+   * 内核给不出时 total 为 0，UI 只显示百分比。全书进度看 `fraction`，与这里无关。
    */
   positionCurrent: number;
   positionTotal: number;
@@ -53,6 +55,13 @@ export interface BookInfo {
 }
 
 export type FlowMode = 'paginated' | 'scrolled';
+/**
+ * 翻页动效（REQ-2026-10-11-03）。
+ * - `none`：硬切（默认，Q8/D3 定案「默认关」）
+ * - `slide`：内核自带的横向滑动（300ms）
+ * - `curl`：我们自己的「翻纸」动效（整页绕竖直边 3D 翻转）
+ */
+export type PageTurnMode = 'none' | 'slide' | 'curl';
 export type ThemeKey = 'light' | 'sepia' | 'dark';
 /** 中文排版的开关方式：auto = 按书籍自身的语言自动判断。 */
 export type CjkMode = 'auto' | 'on' | 'off';
@@ -75,6 +84,8 @@ export interface RendererSettings {
   cjkTypography: CjkMode;
   /** 页上书签图案的颜色（固定色，不随阅读主题变色，见 REQ-2026-10-11-04） */
   bookmarkColor: BookmarkColorName;
+  /** 翻页动效（见 REQ-2026-10-11-03） */
+  pageTurn: PageTurnMode;
 }
 
 export const DEFAULT_SETTINGS: RendererSettings = {
@@ -87,6 +98,7 @@ export const DEFAULT_SETTINGS: RendererSettings = {
   maxColumnCount: 1,
   cjkTypography: 'auto',
   bookmarkColor: 'blue',
+  pageTurn: 'none',
 };
 
 /**

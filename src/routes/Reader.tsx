@@ -34,6 +34,21 @@ const PROGRESS_SAVE_MS = 1200;
 /** 工具栏无操作多久后自动隐藏（毫秒）。 */
 const BAR_HIDE_MS = 4000;
 
+/**
+ * 「翻页动效掉帧」提示是否已经弹过。
+ *
+ * 按 Q9 / D4 定案：**每次切到「翻纸」只提醒一次**，之后不再打扰；标记跨重启保留，
+ * 只有翻纸「关 → 开」才重置（所以写 localStorage，不是内存态）。
+ */
+const PAGE_TURN_WARN_KEY = 'inkwell.reader.pageTurnWarned';
+
+/**
+ * 页上书签缎带离正文区右边缘的距离（px）。
+ *
+ * 贴在最右边会显得像贴在窗口上、而不是贴在书页上，所以留一点内缩。
+ */
+const RIBBON_INSET_PX = 14;
+
 export default function Reader() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -112,6 +127,8 @@ export default function Reader() {
   }, []);
   /** 一次性操作反馈（加 / 去书签） */
   const [toast, setToast] = useState<string | null>(null);
+  /** 翻页动效掉帧的一次性提示气泡 */
+  const [turnWarning, setTurnWarning] = useState(false);
 
   const theme = THEMES[settings.theme];
   /** PDF 本次不做批注（Q11），书签入口与 CFI 记录都要绕开 */
@@ -180,6 +197,24 @@ export default function Reader() {
     };
   }, [id]);
 
+  /**
+   * 切到「翻纸」时清掉「已提醒」标记：关掉再打开就能再提醒一次（Q9 / D4）。
+   *
+   * 用 ref 记上一次的值，避免**应用启动**时也把标记清掉 —— 那次不算「用户开了翻纸」，
+   * 否则重启后又会被打扰（Q9 明确要求重启不重置）。
+   */
+  const prevTurnMode = useRef(settings.pageTurn);
+  useEffect(() => {
+    if (prevTurnMode.current !== settings.pageTurn && settings.pageTurn === 'curl') {
+      try {
+        localStorage.removeItem(PAGE_TURN_WARN_KEY);
+      } catch {
+        /* 忽略 */
+      }
+    }
+    prevTurnMode.current = settings.pageTurn;
+  }, [settings.pageTurn]);
+
   // ---- 启动引擎（每本书只做一次）----
   useEffect(() => {
     const host = hostRef.current;
@@ -232,6 +267,23 @@ export default function Reader() {
       if (hit) setEditor({ mode: 'edit', annotation: hit });
     });
 
+    // 翻页动效掉帧：只提醒一次（标记见 PAGE_TURN_WARN_KEY）
+    const offStutter = engine.onTurnStutter(() => {
+      let warned = false;
+      try {
+        warned = localStorage.getItem(PAGE_TURN_WARN_KEY) === '1';
+      } catch {
+        // 无痕模式等写不进去：当作没提醒过，至少当场提示一次
+      }
+      if (warned) return;
+      try {
+        localStorage.setItem(PAGE_TURN_WARN_KEY, '1');
+      } catch {
+        /* 同上，忽略 */
+      }
+      setTurnWarning(true);
+    });
+
     // 下拉手势：过线后松手就切换当前页的书签
     const offPullProgress = engine.onPullProgress(handlePullProgress);
     const offPullTrigger = engine.onPullTrigger(() => {
@@ -268,6 +320,7 @@ export default function Reader() {
       offRelocate();
       offSelection();
       offAnnotationClick();
+      offStutter();
       offPullProgress();
       offPullTrigger();
       offToggleBars();
@@ -747,8 +800,9 @@ export default function Reader() {
           {showRibbon && error === null && (
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute top-0 right-0 z-[12]"
+              className="pointer-events-none absolute top-0 z-[12]"
               style={{
+                right: RIBBON_INSET_PX,
                 width: 20,
                 height: 34,
                 background: BOOKMARK_COLORS[settings.bookmarkColor],
@@ -914,6 +968,32 @@ export default function Reader() {
           {formatPercent(fraction)}
         </span>
       </footer>
+
+      {/* 翻页动效掉帧的一次性提示（Q9）：只弹一次，标记见 PAGE_TURN_WARN_KEY */}
+      {turnWarning && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-14 z-30 flex justify-center px-4">
+          <div className="pointer-events-auto flex max-w-full items-center gap-3 rounded-lg border border-app-border bg-app-surface px-3 py-2 text-xs text-app-fg shadow-lg">
+            <span className="min-w-0">翻页动效有点卡，建议改成「滑动」。</span>
+            <button
+              type="button"
+              onClick={() => {
+                updateSettings({ pageTurn: 'slide' });
+                setTurnWarning(false);
+              }}
+              className="shrink-0 cursor-pointer rounded border border-app-border px-2 py-0.5 text-xs text-app-accent hover:bg-app-hover"
+            >
+              改滑动
+            </button>
+            <button
+              type="button"
+              onClick={() => setTurnWarning(false)}
+              className="shrink-0 cursor-pointer rounded px-2 py-0.5 text-xs text-app-muted hover:bg-app-hover"
+            >
+              知道了
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 侧栏 */}
       {showToc && (
