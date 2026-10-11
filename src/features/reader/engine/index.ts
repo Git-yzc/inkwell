@@ -78,6 +78,14 @@ export const PULL_HINT_PX = 36;
 export const PULL_TRIGGER_PX = 96;
 /** 竖直位移至少是水平位移的多少倍才算「下拉」而不是横向滑动。 */
 const PULL_VERTICAL_RATIO = 1.6;
+/**
+ * 判定为「竖直下拉」的位移阈值（px）。
+ *
+ * 超过它就把这一轮手势从内核手里拦下来（见 #onPullMove）：内核在同一个书籍文档上
+ * 也挂了 touch 处理器，会把拖动当横向滑动（scrollBy(dx)）、松手还会 snap 翻页 ——
+ * 真机上表现为「下拉时整页乱晃、还翻到下一页」。
+ */
+const PULL_SUPPRESS_PX = 12;
 
 /** 双击判定的最大间隔（毫秒）：超过它两次点按各自独立。 */
 const DOUBLE_TAP_MS = 320;
@@ -317,6 +325,8 @@ export class ReaderEngine {
   #pullPhase: 'idle' | 'pulling' | 'armed' = 'idle';
   /** 一次手势只触发一次，松手才复位 */
   #pullFired = false;
+  /** 这一轮下拉是否已经把事件从内核手里拦下来（松手时也要拦，防它 snap） */
+  #pullSuppressed = false;
   #opened = false;
   /** 已挂上滚轮监听的书籍文档；换章节会换文档，用它去重 */
   #wheelDoc: Document | null = null;
@@ -695,32 +705,39 @@ export class ReaderEngine {
    * 监听正文里的「下拉」手势（向下滑）。
    *
    * **只在翻页模式下启用**：
-   * - 翻页模式下正文没有竖直滚动，向下拖本来就是空操作。而且内核的 `snap()`
-   *   在横排下只看 `vx`（见 paginator.js:805），所以纯竖直拖动不会误翻页 ——
-   *   这条是读源码确认的，不是猜的。
+   * - 翻页模式下正文没有竖直滚动，向下拖本来就是空操作。
    * - 滚动模式下向下拖就是正常的向上滚页，抢过来会很别扭，所以不启用。
    *
    * 另外，正在选词时不触发：那时候用户拖的是选择手柄，不是下拉。
+   *
+   * ⚠️ **必须用 capture 抢在内核前面**：内核在**同一个书籍文档**上也挂了
+   * touch 处理器（`paginator.js:571-575`），它把任何拖动都当横向滑动
+   * （`scrollBy(dx)`），松手还会按手指的横向速度 `snap()` —— 于是下拉时
+   * 页面会横向乱晃、甚至翻到下一页（真机反馈的就是这个）。capture 阶段的
+   * 监听器比内核的（冒泡阶段、挂在同一个 Document 上）先执行，所以判定为
+   * 竖直下拉后 `stopPropagation()`，内核这一轮就完全收不到事件了。
    */
   #bindPullDown(doc: Document | undefined): void {
     // 固定版式（PDF）本次不做书签，手势也就没有意义
     if (!doc || this.#fixedLayout || this.#pullDoc === doc) return;
     this.#unbindPullDown();
     this.#pullDoc = doc;
-    // 只读不拦截，所以 passive 即可（也省得拖慢滚动）
-    doc.addEventListener('touchstart', this.#onPullStart, { passive: true });
-    doc.addEventListener('touchmove', this.#onPullMove, { passive: true });
-    doc.addEventListener('touchend', this.#onPullEnd, { passive: true });
-    doc.addEventListener('touchcancel', this.#onPullEnd, { passive: true });
+    // capture + passive:false：要比内核先拿到事件，并且能 preventDefault（见上面的说明）
+    const opts = { passive: false, capture: true } as const;
+    doc.addEventListener('touchstart', this.#onPullStart, opts);
+    doc.addEventListener('touchmove', this.#onPullMove, opts);
+    doc.addEventListener('touchend', this.#onPullEnd, opts);
+    doc.addEventListener('touchcancel', this.#onPullEnd, opts);
   }
 
   #unbindPullDown(): void {
     const doc = this.#pullDoc;
     if (doc) {
-      doc.removeEventListener('touchstart', this.#onPullStart);
-      doc.removeEventListener('touchmove', this.#onPullMove);
-      doc.removeEventListener('touchend', this.#onPullEnd);
-      doc.removeEventListener('touchcancel', this.#onPullEnd);
+      // ⚠️ 第三个参数必须与注册时一致（capture:true），否则摘不掉
+      doc.removeEventListener('touchstart', this.#onPullStart, true);
+      doc.removeEventListener('touchmove', this.#onPullMove, true);
+      doc.removeEventListener('touchend', this.#onPullEnd, true);
+      doc.removeEventListener('touchcancel', this.#onPullEnd, true);
     }
     this.#pullDoc = null;
     this.#resetPull();
@@ -731,6 +748,7 @@ export class ReaderEngine {
     this.#pullStart = null;
     this.#pullFired = false;
     this.#pullPhase = 'idle';
+    this.#pullSuppressed = false;
     this.#emitPull(0);
   }
 
@@ -746,6 +764,7 @@ export class ReaderEngine {
     this.#pullStart = { x: t.clientX, y: t.clientY };
     this.#pullFired = false;
     this.#pullPhase = 'idle';
+    this.#pullSuppressed = false;
     this.#emitPull(0);
   };
 
@@ -766,6 +785,14 @@ export class ReaderEngine {
     const dy = t.clientY - start.y;
     const dx = Math.abs(t.clientX - start.x);
 
+    // 一旦判定是「竖直下拉」，就把这一轮手势从内核手里拦下来：
+    // 内核会 scrollBy(dx) + snap(vx)，正是页面乱晃 / 误翻页的来源。
+    if (dy > PULL_SUPPRESS_PX && dy > dx * PULL_VERTICAL_RATIO) {
+      this.#pullSuppressed = true;
+      e.stopPropagation();
+      e.preventDefault();
+    }
+
     // 往上拖、或横向为主的滑动，都不算这个手势
     if (dy < PULL_HINT_PX || dy < dx * PULL_VERTICAL_RATIO) {
       this.#pullPhase = 'idle';
@@ -777,8 +804,14 @@ export class ReaderEngine {
     this.#emitPull(dy);
   };
 
-  #onPullEnd = (): void => {
+  #onPullEnd = (e: TouchEvent): void => {
     const fire = this.#pullPhase === 'armed' && !this.#pullFired;
+    // 拦过的这一轮，结束事件也不能让内核收到 —— 否则它会拿旧的横向速度去 snap 翻页
+    if (this.#pullSuppressed) {
+      this.#pullSuppressed = false;
+      e.stopPropagation();
+      e.preventDefault();
+    }
     this.#pullStart = null;
     this.#pullFired = true;
     this.#pullPhase = 'idle';

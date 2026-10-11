@@ -483,14 +483,23 @@ export default function Reader() {
   /** 批注（高亮/笔记）条数。顶栏「批注」按钮只数批注，书签已分出去（REQ-2026-10-11-07）。 */
   const highlightCount = annotations.filter((a) => a.type === 'highlight').length;
 
-  /** 下拉阻尼：跟手但不 1:1；上限 150px，免得拉到底整页飞出屏幕。 */
-  const pullDamped = Math.min(pullRaw * 0.55, 150);
+  /** 下拉位移：前 90px 与手指 1:1（真机上「直上直下」的手感），之后带阻尼，最多 160px。 */
+  const pullDamped = pullRaw <= 90 ? pullRaw : Math.min(90 + (pullRaw - 90) * 0.45, 160);
   const pullArmed = pullRaw >= PULL_TRIGGER_PX;
   /** 本页已有书签时下拉是「删除」，提示文案要跟着变（REQ-2026-10-11-05） */
   const pullAction = bookmarkHere ? '删除' : '添加';
 
   /** 缎带只在「翻页」模式出现：滚动模式没有「页」，B10 定案不管它（不显示、不响应手势）。 */
   const showRibbon = bookmarkHere && settings.flow === 'paginated';
+
+  /**
+   * 缎带的高度：按「页边距」缩放，保证整条落在页面的**上边距**里、不压正文。
+   *
+   * 内核把正文框的顶部至少留出 `margin`（见 paginator 的 `grid-template-rows`），
+   * 所以高度只要 ≤ margin 就一定不会盖住文字。用户把页边距调小，缎带跟着变短
+   * ——真机反馈过「缎带压在正文上」，就是固定 34px 在页边距小的机器上撞出来的。
+   */
+  const ribbonHeight = Math.max(12, Math.min(26, settings.margin - 10));
 
   function handleTocSelect(item: TocItem) {
     setShowToc(false);
@@ -754,11 +763,12 @@ export default function Reader() {
           {showRibbon && error === null && (
             <span
               aria-hidden="true"
-              className="pointer-events-none absolute top-0 z-[12]"
+              className="pointer-events-none absolute z-[12]"
               style={{
+                top: 2,
                 right: RIBBON_INSET_PX,
-                width: 20,
-                height: 34,
+                width: 18,
+                height: ribbonHeight,
                 background: BOOKMARK_COLORS[settings.bookmarkColor],
                 clipPath: 'polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%)',
                 filter: 'drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35))',
