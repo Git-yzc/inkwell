@@ -807,11 +807,19 @@ WebDAV 或局域网 HTTP，同步阅读进度（CFI）、批注、设置。
 > • [页上书签图案 + 下拉手势 + 书签/批注拆分](REQUIREMENTS-2026-10-11-bookmark-indicator.md)（✅ 已实现）
 > • Windows 双页展示（❌ 已取消：即现有「分栏」）
 
-> 📦 **0.3.0 安装包（2026-10-11，最终版）**：`Inkwell-0.3.0-win-x64-setup.exe`（**6.1 MB**，
-> SHA256 `0BE9DA71F330EF89725F165DB6061ADE16E5DC8DBE3F0C1D2A69851393DADE96`）——
+> 📦 **0.3.0 已发布（2026-10-11）**：GitHub Release
+> [`v0.3.0`](https://github.com/Git-yzc/inkwell/releases/tag/v0.3.0)，三个产物都已上传：
+>
+> | 产物 | 大小 | SHA256 |
+> | --- | --- | --- |
+> | `Inkwell-0.3.0-win-x64-setup.exe` | 6.1 MB | `0BE9DA71F330EF89725F165DB6061ADE16E5DC8DBE3F0C1D2A69851393DADE96` |
+> | `Inkwell-0.3.0-arm64.apk` | 14.0 MB | `66C6B41EB1C8D3861E9E8C80BF491246FF6C54D4546C422BEE8DB352FD55CE56` |
+> | `Inkwell-0.3.0-universal.apk` | 47.7 MB | `792AE17FB9F41FBADA077CDBEF242E41A99991976A59263E1263C1A5875D7871` |
+>
 > 含 **3 项已实现**的需求：书签与批注拆分、页上书签缎带 + 下拉手势（含 **DB 迁移 v2**）、
 > 章内页号角标。**不含**翻页动效（该需求已取消，代码已撤）。
-> 分发副本在 `%USERPROFILE%\Downloads\Inkwell\`（给用户双击的那一份，见 [AGENTS.md](../AGENTS.md) §3）。
+> `personal/out/` 有副本；给用户双击的安装包另在 `%USERPROFILE%\Downloads\Inkwell\`
+> （见 [AGENTS.md](../AGENTS.md) §3）。
 
 **页号角标改成「当前章节的进度」（REQ-2026-10-11-01，✅ 已实现）**
 

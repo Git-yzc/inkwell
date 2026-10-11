@@ -10,7 +10,7 @@
 | 项 | 内容 |
 | --- | --- |
 | 项目名 | **砚池**（英文 **Inkwell**） |
-| 性质 | **个人自用**电子书阅读器。源码公开托管于 GitHub，但**不发版、不上架应用商店** |
+| 性质 | **个人自用**电子书阅读器。源码公开托管于 GitHub；**不上架应用商店**（GitHub Release 只作自用分发） |
 | 实现路线 | **自研精简版**：自己写应用外壳，复用成熟渲染内核 |
 | 技术栈 | Tauri v2 + Vite + React 19 + TypeScript；Rust 后端 + SQLite |
 | 渲染内核 | **foliate-js（MIT）** —— 唯一复用的大型第三方内核 |
@@ -218,6 +218,7 @@ myEpubReader/                     # 仓库目录（应用名是 Inkwell，二者
 | 阶段 2：中文化 + 批注 + 搜索 | 🔄 进行中：中文排版 ✅、批注 ✅（高亮/笔记/书签/导出）、Android 真机适配 ✅；中文字体 / 简繁转换 / 全文搜索待做 |
 | **0.2.0 增强批次** | ✅ **已实现**（App 白天/夜间、双击工具栏、页号角标、页边距修复、PDF 阅读）—— 见 `docs/BACKLOG.md` §2.6 与 `docs/REQUIREMENTS-2026-10-05.md` §八 |
 | **0.2.2 打开方式** | ✅ **已实现**（双击 / 「打开方式 → 砚池」epub 直接进阅读器；Android 打开+分享）—— 见 `docs/BACKLOG.md` §2.8 与 `docs/REQUIREMENTS-2026-10-10-open-file.md`。⚠️ Android 真机未验 |
+| **0.3.0 阅读体验批次** | ✅ **已实现并发布**（书签/批注拆分、页上书签缎带 + 下拉手势、章内页号角标；**翻页动效经用户决定取消**）—— 见 `docs/BACKLOG.md` §九与 `docs/REQUIREMENTS-2026-10-11-*.md`。⚠️ Android 真机未验 |
 | 阶段 3 及以后 | ⏸️ 未开始 |
 
 **阶段 1 已交付的能力**：书库（导入/封面/搜索/排序/删除）、阅读器
@@ -246,13 +247,25 @@ myEpubReader/                     # 仓库目录（应用名是 Inkwell，二者
   并**续读上次位置**；应用在跑时再双击是**新开窗口**（多实例写库靠 `busy_timeout` 兜住）；
   Android 同时接「打开」（`ACTION_VIEW`）与「分享」（`ACTION_SEND`）（§2.8）
 
+**0.3.0 已交付**（2026-10-11，已发 GitHub Release
+[`v0.3.0`](https://github.com/Git-yzc/inkwell/releases/tag/v0.3.0)）：
+
+- **书签与批注拆开** —— 侧栏两个独立列表；顶栏「批注」计数只数批注
+- **页上书签缎带 + 下拉手势** —— 右上角缎带（四色）、下拉跟手增删、
+  **单栏 / 双栏书签互不相通**（含**数据库迁移 v2**）
+- **章内页号角标** —— 角标按当前章节走，百分比与进度条仍按全书
+- ❌ **翻页动效取消** —— 真卷页需要页快照，正文在 iframe 里拿不到；代码已撤（§九 有取消记录）
+
 **实测产物**（`personal/out/` 下有副本）：
 
 | 产物 | 路径 | 大小 |
 | --- | --- | --- |
-| **Windows 安装包（0.2.2）** | `personal/out/Inkwell-0.2.2-win-x64-setup.exe` | **6.39 MB** |
-| **Android APK（0.2.2，arm64，手机用）** | `personal/out/Inkwell-0.2.2-arm64.apk` | **14.7 MB** |
-| **Android APK（0.2.2，universal，全架构）** | `personal/out/Inkwell-0.2.2-universal.apk` | **50.0 MB** |
+| **Windows 安装包（0.3.0）** | `personal/out/Inkwell-0.3.0-win-x64-setup.exe` | **6.1 MB** |
+| **Android APK（0.3.0，arm64，手机用）** | `personal/out/Inkwell-0.3.0-arm64.apk` | **14.0 MB** |
+| **Android APK（0.3.0，universal，全架构）** | `personal/out/Inkwell-0.3.0-universal.apk` | **47.7 MB** |
+| **Windows 安装包（0.2.2）** | `personal/out/Inkwell-0.2.2-win-x64-setup.exe` | 6.39 MB |
+| **Android APK（0.2.2，arm64）** | `personal/out/Inkwell-0.2.2-arm64.apk` | 14.7 MB |
+| **Android APK（0.2.2，universal）** | `personal/out/Inkwell-0.2.2-universal.apk` | 50.0 MB |
 | （历史）0.2.0 / 0.1.1 / 0.1.0 的包 | 见 `personal/out/` | 6.09 / 14.0 / 47.6 MB 等 |
 
 > 0.2.2 的分发副本已放到 `%USERPROFILE%\Downloads\Inkwell\`（给人装的那一份；
