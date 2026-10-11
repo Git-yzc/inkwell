@@ -130,17 +130,21 @@ if ($found.Count -gt 0) {
     $shelf = Join-Path $env:USERPROFILE 'Downloads\Inkwell'
     New-Item -ItemType Directory -Path $shelf -Force | Out-Null
     # 只放**这一次**的产物，并清掉架子上以前的安装包：一堆历史版本放一起最容易被点错
-    $version = (Get-Content (Join-Path $RepoRoot 'src-tauri\tauri.conf.json') -Raw | ConvertFrom-Json).version
+    # ⚠️ 必须显式 -Encoding UTF8：PowerShell 5.1 在文件没有 BOM 时按 ANSI 解码，
+    # 中文 title 会变乱码、ConvertFrom-Json 直接抛错，$version 取空 →
+    # 拷出来的文件名会变成 Inkwell--win-x64-setup.exe（2026-10-11 实际踩到）。
+    $version = (Get-Content (Join-Path $RepoRoot 'src-tauri\tauri.conf.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version
     Get-ChildItem (Join-Path $shelf 'Inkwell*setup.exe') -ErrorAction SilentlyContinue | Remove-Item -Force
     $current = Get-ChildItem (Join-Path $nsisDir ("Inkwell_{0}_x64-setup.exe" -f $version)) -ErrorAction SilentlyContinue
-    if ($current) {
-        Copy-Item $current.FullName (Join-Path $shelf ("Inkwell-{0}-win-x64-setup.exe" -f $version)) -Force
-    } else {
+    if (-not $current) {
         Write-Bad ('没找到本次版本的安装包: Inkwell_' + $version + '_x64-setup.exe')
+        exit 1
     }
+    $target = Join-Path $shelf ("Inkwell-{0}-win-x64-setup.exe" -f $version)
+    Copy-Item $current.FullName $target -Force
 
     Write-Host ''
-    Write-Host ('  ✅ 双击这份装（在工作区外）: ' + (Join-Path $shelf ("Inkwell-{0}-win-x64-setup.exe" -f $version))) -ForegroundColor Yellow
+    Write-Host ('  ✅ 双击这份装（在工作区外）: ' + $target) -ForegroundColor Yellow
     Write-Host '  ⚠️ 别双击工作区里那份 —— 会被会话沙箱拦掉写入。' -ForegroundColor Yellow
     Write-Host ''
     Write-Host '  当前用户安装，不需要管理员。' -ForegroundColor White
