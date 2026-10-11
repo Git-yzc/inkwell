@@ -800,10 +800,17 @@ WebDAV 或局域网 HTTP，同步阅读进度（CFI）、批注、设置。
 
 ## 九、下一版本需求
 
-> 用户 2026-10-11 提出，**尚未动代码**。各自的需求全文、现状证据与验收口径见对应文档：
-> • [章内页号角标](REQUIREMENTS-2026-10-11-chapter-progress.md)（✅ 已定案待实现）
-> • [仿纸质书翻页动效](REQUIREMENTS-2026-10-11-spread-page-turn.md)（✅ 已定案待实现）
-> • [页上书签图案 + 下拉手势 + 书签/批注拆分](REQUIREMENTS-2026-10-11-bookmark-indicator.md)（✅ 已定案待实现）
+> 用户 2026-10-11 提出，**实现中**（0.3.0，4 项里已完成 2 项）。各自的需求全文、
+> 现状证据与验收口径见对应文档：
+> • [章内页号角标](REQUIREMENTS-2026-10-11-chapter-progress.md)（✅ 已定案，⏳ 待实现）
+> • [仿纸质书翻页动效](REQUIREMENTS-2026-10-11-spread-page-turn.md)（✅ 已定案，⏳ 待实现）
+> • [页上书签图案 + 下拉手势 + 书签/批注拆分](REQUIREMENTS-2026-10-11-bookmark-indicator.md)（✅ 已实现）
+
+> 📦 **0.3.0 预览包（2026-10-11）**：`Inkwell-0.3.0-win-x64-setup.exe`（**6.1 MB**，
+> SHA256 `15806B79ACCC11D9FBD542D4C5F9412AE83CD5F991A71CEFE87AE00D2792B98E`）——
+> 只含**已完成的两项**（书签与批注拆分、页上书签缎带 + 下拉手势 + 单双栏隔离），
+> 翻页动效与章内页号角标**还没有**。分发副本在 `%USERPROFILE%\Downloads\Inkwell\`
+> （给用户双击的那一份，见 [AGENTS.md](../AGENTS.md) §3）。
 
 **页号角标改成「当前章节的进度」（REQ-2026-10-11-01）**
 
