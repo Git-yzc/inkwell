@@ -807,11 +807,11 @@ WebDAV 或局域网 HTTP，同步阅读进度（CFI）、批注、设置。
 > • [仿纸质书翻页动效](REQUIREMENTS-2026-10-11-spread-page-turn.md)（✅ 已实现，⚠️ 有偏差，见文档 §九）
 > • [页上书签图案 + 下拉手势 + 书签/批注拆分](REQUIREMENTS-2026-10-11-bookmark-indicator.md)（✅ 已实现）
 
-> 📦 **0.3.0 预览包（2026-10-11）**：`Inkwell-0.3.0-win-x64-setup.exe`（**6.1 MB**，
-> SHA256 `15806B79ACCC11D9FBD542D4C5F9412AE83CD5F991A71CEFE87AE00D2792B98E`）——
-> 只含**已完成的两项**（书签与批注拆分、页上书签缎带 + 下拉手势 + 单双栏隔离），
-> 翻页动效与章内页号角标**还没有**。分发副本在 `%USERPROFILE%\Downloads\Inkwell\`
-> （给用户双击的那一份，见 [AGENTS.md](../AGENTS.md) §3）。
+> 📦 **0.3.0 安装包（2026-10-11，含全部四项）**：`Inkwell-0.3.0-win-x64-setup.exe`（**6.1 MB**，
+> SHA256 `E5D6B4727C1A275FAA053BC609304ECF143CFD70035847EC04B0030E04502174`）——
+> 这个包把 0.3.0 四项需求全部装了进去：书签与批注拆分、页上书签缎带 + 下拉手势
+> （含 **DB 迁移 v2**）、仿纸质书翻页动效、章内页号角标。
+> 分发副本在 `%USERPROFILE%\Downloads\Inkwell\`（给用户双击的那一份，见 [AGENTS.md](../AGENTS.md) §3）。
 
 **页号角标改成「当前章节的进度」（REQ-2026-10-11-01，✅ 已实现）**
 
