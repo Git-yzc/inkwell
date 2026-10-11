@@ -55,13 +55,6 @@ export interface BookInfo {
 }
 
 export type FlowMode = 'paginated' | 'scrolled';
-/**
- * 翻页动效（REQ-2026-10-11-03）。
- * - `none`：硬切（默认，Q8/D3 定案「默认关」）
- * - `slide`：内核自带的横向滑动（300ms）
- * - `curl`：我们自己的「翻纸」动效（整页绕竖直边 3D 翻转）
- */
-export type PageTurnMode = 'none' | 'slide' | 'curl';
 export type ThemeKey = 'light' | 'sepia' | 'dark';
 /** 中文排版的开关方式：auto = 按书籍自身的语言自动判断。 */
 export type CjkMode = 'auto' | 'on' | 'off';
@@ -84,8 +77,6 @@ export interface RendererSettings {
   cjkTypography: CjkMode;
   /** 页上书签图案的颜色（固定色，不随阅读主题变色，见 REQ-2026-10-11-04） */
   bookmarkColor: BookmarkColorName;
-  /** 翻页动效（见 REQ-2026-10-11-03） */
-  pageTurn: PageTurnMode;
 }
 
 export const DEFAULT_SETTINGS: RendererSettings = {
@@ -98,7 +89,6 @@ export const DEFAULT_SETTINGS: RendererSettings = {
   maxColumnCount: 1,
   cjkTypography: 'auto',
   bookmarkColor: 'blue',
-  pageTurn: 'none',
 };
 
 /**

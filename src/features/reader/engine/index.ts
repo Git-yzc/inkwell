@@ -60,8 +60,6 @@ type AnnotationClickListener = (cfi: string) => void;
 type PullProgressListener = (offset: number) => void;
 /** 下拉到触发线后松手。 */
 type PullTriggerListener = () => void;
-/** 翻页动效播放时掉帧明显（Reader 用来弹「建议改滑动」的一次性提示）。 */
-type TurnStutterListener = (info: { droppedFrames: number }) => void;
 /** 正文中间区域被双击（Android 上用来切换上下工具栏，见 REQ-2026-10-05-01）。 */
 type ToggleBarsListener = () => void;
 
@@ -80,13 +78,6 @@ export const PULL_HINT_PX = 36;
 export const PULL_TRIGGER_PX = 96;
 /** 竖直位移至少是水平位移的多少倍才算「下拉」而不是横向滑动。 */
 const PULL_VERTICAL_RATIO = 1.6;
-
-/** 「翻纸」动效单程时长（毫秒）。进 + 出各一次，合计约 500ms（Q8 定案）。 */
-const CURL_HALF_MS = 250;
-/** 掉帧判据：一帧耗时超过这个毫秒数，记一次掉帧。 */
-const STUTTER_FRAME_MS = 50;
-/** 一次翻页里掉帧达到这个数，就认为「卡」，触发一次提示（Q9）。 */
-const STUTTER_DROPS = 3;
 
 /** 双击判定的最大间隔（毫秒）：超过它两次点按各自独立。 */
 const DOUBLE_TAP_MS = 320;
@@ -312,9 +303,6 @@ export class ReaderEngine {
   #pullProgressListeners = new Set<PullProgressListener>();
   #pullTriggerListeners = new Set<PullTriggerListener>();
   #toggleBarsListeners = new Set<ToggleBarsListener>();
-  #stutterListeners = new Set<TurnStutterListener>();
-  /** 翻页动效播放中：期间丢弃并发翻页请求（Q10 加锁） */
-  #turning = false;
   /** 固定版式（PDF / 漫画）：不套文字排版、不绑划词与下拉手势 */
   #fixedLayout = false;
   /** 已挂上双击监听的书籍文档（换章节会换文档，按文档去重） */
@@ -592,111 +580,11 @@ export class ReaderEngine {
   /* ---------------------------------------------------------------- 导航 */
 
   async next(): Promise<void> {
-    await this.#turn('next');
+    if (this.#opened) await this.#view.next();
   }
 
   async prev(): Promise<void> {
-    await this.#turn('prev');
-  }
-
-  /**
-   * 相邻翻页的唯一入口（点按 / 滚轮 / 方向键都走这里）。
-   *
-   * 翻页动效与**加锁**都收在这一处：动效播放期间新的翻页请求直接丢弃，
-   * 免得连点 / 连滚把页码打乱（REQ-2026-10-11-03 的 Q10）。
-   * 目录跳转与进度条跳转走 goTo / goToFraction，**不经过这里**，所以没有动效（Q7）。
-   */
-  async #turn(dir: 'next' | 'prev'): Promise<void> {
-    if (!this.#opened || this.#turning) return;
-    const s = this.#settings;
-    const curl = s?.pageTurn === 'curl' && s.flow === 'paginated' && !this.#fixedLayout;
-    if (!curl) {
-      // 「滑动」由内核的 animated 属性负责（见 #applyRendererAttributes），这里只管翻页
-      await (dir === 'next' ? this.#view.next() : this.#view.prev());
-      return;
-    }
-    this.#turning = true;
-    try {
-      await this.#playCurl(dir);
-    } finally {
-      this.#turning = false;
-    }
-  }
-
-  /**
-   * 「翻纸」动效：当前页绕外侧边转出去 → 在页面快与视线平行时换页 → 新页从另一侧转回来。
-   *
-   * ⚠️ 为什么不是「从右下角卷起一页」：真正的卷页要把当前页**拍成位图**再做形变，
-   * 而正文在 iframe 里，不引入新依赖的前提下 WebView2 拿不到可用的 DOM 快照。
-   * 这里用整页绕竖直边的 3D 旋转 + 明暗变化逼近「翻过去」的观感。
-   * 方向按 Q6/D2：**下一页一律从右往左翻，不随书籍书写方向镜像**。
-   */
-  async #playCurl(dir: 'next' | 'prev'): Promise<void> {
-    const el = this.#view;
-    const out = dir === 'next' ? -90 : 90;
-    const back = dir === 'next' ? 90 : -90;
-
-    // 掉帧监测：只统计动效播放期间相邻两帧的间隔
-    let drops = 0;
-    let last = performance.now();
-    let running = true;
-    const tick = () => {
-      if (!running) return;
-      const now = performance.now();
-      if (now - last > STUTTER_FRAME_MS) drops++;
-      last = now;
-      requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-
-    el.style.transformOrigin = dir === 'next' ? 'right center' : 'left center';
-    const a1 = el.animate(
-      [
-        { transform: 'perspective(1400px) rotateY(0deg)', filter: 'brightness(1)' },
-        { transform: `perspective(1400px) rotateY(${out}deg)`, filter: 'brightness(0.7)' },
-      ],
-      { duration: CURL_HALF_MS, easing: 'cubic-bezier(0.55, 0, 0.85, 1)', fill: 'forwards' },
-    );
-    await a1.finished.catch(() => {});
-    a1.cancel();
-
-    // ⚠️ 换页前必须把 transform 彻底清掉，并先藏起来：
-    // 内核是靠 getBoundingClientRect() 折页面尺寸的，元素一旦带上 rotateY，
-    // 它量到的宽度会塌成 0 → 页码与进度直接算成 NaN（实测踩到，只有「翻纸」模式中招）。
-    // 用 visibility 而不是 display，免得布局变化又去触发内核重排。
-    el.style.transform = '';
-    el.style.transformOrigin = '';
-    el.style.visibility = 'hidden';
-
-    if (dir === 'next') await this.#view.next();
-    else await this.#view.prev();
-
-    el.style.visibility = '';
-
-    el.style.transformOrigin = dir === 'next' ? 'left center' : 'right center';
-    const a2 = el.animate(
-      [
-        { transform: `perspective(1400px) rotateY(${back}deg)`, filter: 'brightness(0.7)' },
-        { transform: 'perspective(1400px) rotateY(0deg)', filter: 'brightness(1)' },
-      ],
-      { duration: CURL_HALF_MS, easing: 'cubic-bezier(0.15, 0.15, 0.4, 1)', fill: 'forwards' },
-    );
-    await a2.finished.catch(() => {});
-
-    running = false;
-    a2.cancel();
-    el.style.transform = '';
-    el.style.transformOrigin = '';
-
-    if (drops >= STUTTER_DROPS) {
-      for (const fn of this.#stutterListeners) fn({ droppedFrames: drops });
-    }
-  }
-
-  /** 订阅「翻页动效掉帧明显」（Reader 用来弹一次提示，见 Q9）。 */
-  onTurnStutter(fn: TurnStutterListener): () => void {
-    this.#stutterListeners.add(fn);
-    return () => this.#stutterListeners.delete(fn);
+    if (this.#opened) await this.#view.prev();
   }
 
   /** target 可以是 CFI 串、章节序号，或目录项的 href。 */
@@ -769,11 +657,6 @@ export class ReaderEngine {
     // 内核自己的默认值就是 48px，且 #beforeRender 是 parseFloat，带 px 不受影响。
     renderer.setAttribute('margin', `${s.margin}px`);
     renderer.setAttribute('max-column-count', String(s.maxColumnCount));
-
-    // 翻页动效：「滑动」用内核自带的 300ms 横向滚动（paginator 的 animated 属性）；
-    // 「翻纸」走我们自己的 #playCurl，**绝不能**让内核同时再滑一次。
-    if (s.pageTurn === 'slide') renderer.setAttribute('animated', '');
-    else renderer.removeAttribute('animated');
 
     // setStyles 会把 CSS 注入书籍文档；fixed-layout（漫画）不套用文字排版
     if (this.#view.book?.rendition?.layout !== 'pre-paginated') {

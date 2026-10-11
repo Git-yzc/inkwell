@@ -4,7 +4,6 @@ import {
   CJK_MODE_CHOICES,
   type FlowMode,
   FONT_CHOICES,
-  type PageTurnMode,
   type RendererSettings,
   THEMES,
   type ThemeKey,
@@ -180,25 +179,6 @@ export default function SettingsPanel({ settings, onChange, onReset, onClose }: 
                   <span className={active ? 'text-app-accent' : 'text-app-muted'}>
                     {BOOKMARK_COLOR_LABELS[c]}
                   </span>
-                </button>
-              );
-            })}
-          </div>
-        </Row>
-
-        <Row label="翻页动效">
-          <div className="flex gap-2">
-            {(['none', 'slide', 'curl'] as PageTurnMode[]).map((m) => {
-              const active = settings.pageTurn === m;
-              const label = m === 'none' ? '关' : m === 'slide' ? '滑动' : '翻纸';
-              return (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => onChange({ pageTurn: m })}
-                  className={`${buttonBase} ${active ? 'border-amber-500/70 text-app-accent' : 'border-app-border text-app-muted hover:border-app-muted'}`}
-                >
-                  {label}
                 </button>
               );
             })}
