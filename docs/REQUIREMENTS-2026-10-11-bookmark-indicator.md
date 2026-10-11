@@ -171,3 +171,44 @@
 **验证**（CDP 驱动真实应用）：打开侧栏 → 两个页签，默认「批注」；点顶栏 ☆ 加书签后
 「书签」页签显示 `书签 1` + 记录，而**顶栏「批注」计数仍为空**；切到「批注」页签列表仍为 0
 （书签不串入）；删掉后恢复正常。`pnpm typecheck` / `pnpm lint` 干净。
+
+### REQ-2026-10-11-04 / -05 / -06 页上书签图案 + 下拉手势（✅ 已实现，2026-10-11）
+
+**改动**：
+
+| 文件 | 改动 |
+| --- | --- |
+| [`db.rs`](../src-tauri/src/db.rs) | **迁移 v2**：`annotations` 加 `layout TEXT NOT NULL DEFAULT 'single'`（历史书签即单栏）；`MIGRATIONS_FOR_TEST` 常量改为 `migrations_for_test()`，测试必须跑**全部**迁移 |
+| [`annotation.rs`](../src-tauri/src/annotation.rs) | `LAYOUTS` 白名单、`Annotation.layout`、SELECT / INSERT 带上该列；新增「默认单栏 + 非法值报错」测试 |
+| [`lib.rs`](../src-tauri/src/lib.rs) | `add_annotation` 增 `layout` 参数 |
+| [`api.ts`](../src/lib/api.ts) | `AnnotationLayout`、`Annotation.layout`、`addAnnotation.layout` |
+| [`engine/types.ts`](../src/features/reader/engine/types.ts) | `BOOKMARK_COLORS`（红/蓝/绿/琥珀四固定色）+ `RendererSettings.bookmarkColor`（默认蓝） |
+| [`engine/index.ts`](../src/features/reader/engine/index.ts) | 下拉回调由「三态 `boolean \| null`」改为**连续像素数**（`0` = 没在拉），导出 `PULL_TRIGGER_PX` |
+| [`Reader.tsx`](../src/routes/Reader.tsx) | 按 `layout` 过滤当前页书签；右上角缎带；下拉**整页跟手 + 阻尼 + 回弹**；提示按「添加 / 删除」变文案；只动正文；滚动模式不显示 |
+| [`SettingsPanel.tsx`](../src/features/reader/SettingsPanel.tsx) | 「书签颜色」一行（红 / 蓝 / 绿 / 琥珀） |
+| [`globals.css`](../src/styles/globals.css) | `@keyframes bookmark-drop`：加书签时缎带从上滑入（鼠标加书签也播这个） |
+
+**验证（CDP 驱动真实应用，2026-10-11）**：
+
+| 用例 | 实测 |
+| --- | --- |
+| 应用启动 | 日志 `已应用数据库迁移 v2` |
+| 加书签 | 缎带出现在**右上角**（rect right = 视口宽、top = 48），默认色 `rgb(47,111,208)` |
+| 单栏加的书签 → 切双栏 | 缎带 0、顶栏 ☆ —— **互不相通**生效 |
+| 切回单栏 | 缎带 1、★（同一 CFI，来回切不丢） |
+| 下拉 150px（已有书签） | 页面 `translateY(56.98px)`、提示「↑ 松手删除书签」；松手 → 缎带 0、☆；回弹 `translateY(0px)` |
+| 再下拉 150px（无书签） | 提示「↑ 松手添加书签」；松手 → 缎带 1、★ |
+| 下拉 60px（未过线） | 跟手 `translateY(24.95px)`，松手回弹且**数据不变**（缎带/★ 原样） |
+| 滚动模式 | 缎带不显示；下拉**不跟手**（`translateY(0px)`），手势未生效 |
+| 四种颜色 | 绿 → `rgb(47,158,107)`、蓝 → `rgb(47,111,208)`，切换即时生效 |
+
+`cargo test`（24 passed）/ `cargo clippy --lib -D warnings` / `pnpm typecheck` / `pnpm lint` 全部干净。
+
+**已知限制（需要你决定）**：
+
+- **Windows 触控板的双指下拉做不到**：WebView2 里触控板与鼠标滚轮**都只给 `wheel` 事件**，
+  拿不到来源信息，无法与滚轮翻页区分。**触摸屏与 Android 的触摸都可用**（走 `touch` 事件，已实测）。
+  B11 的「触控板」这一半需要一个别的触发方式（例如：触控板在正文顶端继续下拉算作书签手势），
+  等你定；翻页动效那边的触控板横向滑动不受此限。
+- **Android 真机未验**（本机没有设备）：手势与缎带只在本机用 CDP 派发触摸事件验证过。
+
