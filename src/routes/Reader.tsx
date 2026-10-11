@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import AppThemeToggle from '@/components/AppThemeToggle';
 import AnnotationEditor, { type EditorTarget } from '@/features/annotation/AnnotationEditor';
-import AnnotationPanel from '@/features/annotation/AnnotationPanel';
+import AnnotationPanel, { type AnnotationTab } from '@/features/annotation/AnnotationPanel';
 import { ReaderEngine } from '@/features/reader/engine';
 import {
   type BookInfo,
@@ -56,6 +56,8 @@ export default function Reader() {
   const [showToc, setShowToc] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showAnnotations, setShowAnnotations] = useState(false);
+  /** 侧栏显示哪个列表：批注（高亮/笔记）还是书签（REQ-2026-10-11-07 拆分） */
+  const [annotationTab, setAnnotationTab] = useState<AnnotationTab>('highlight');
   const [fraction, setFraction] = useState(0);
   const [chapter, setChapter] = useState<string | null>(null);
   /** 右下角常驻位置指示（REQ-2026-10-05-02）。total 为 0 表示内核没给，只显示百分比 */
@@ -447,6 +449,9 @@ export default function Reader() {
   const bookmarkHere =
     currentCfi !== null && annotations.some((a) => a.type === 'bookmark' && a.cfi === currentCfi);
 
+  /** 批注（高亮/笔记）条数。顶栏「批注」按钮只数批注，书签已分出去（REQ-2026-10-11-07）。 */
+  const highlightCount = annotations.filter((a) => a.type === 'highlight').length;
+
   function handleTocSelect(item: TocItem) {
     setShowToc(false);
     if (item.href) void engineRef.current?.goTo(item.href);
@@ -651,12 +656,13 @@ export default function Reader() {
           type="button"
           onClick={() => {
             setShowAnnotations((v) => !v);
+            setAnnotationTab('highlight');
             setShowToc(false);
             setShowSettings(false);
           }}
           className={`cursor-pointer rounded px-2 py-1 text-sm hover:bg-app-hover ${showAnnotations ? 'text-app-accent' : ''}`}
         >
-          批注{annotations.length > 0 ? ` ${annotations.length}` : ''}
+          批注{highlightCount > 0 ? ` ${highlightCount}` : ''}
         </button>
         <button
           type="button"
@@ -841,6 +847,8 @@ export default function Reader() {
         <div className="absolute inset-y-0 right-0 z-30" style={{ top: 48 }}>
           <AnnotationPanel
             annotations={annotations}
+            tab={annotationTab}
+            onTabChange={setAnnotationTab}
             exporting={exporting}
             onJump={handleAnnotationJump}
             onDelete={(a) => void handleAnnotationDelete(a)}

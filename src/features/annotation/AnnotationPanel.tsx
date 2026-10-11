@@ -2,8 +2,20 @@ import { HIGHLIGHT_COLORS, type HighlightColorName } from '@/features/reader/eng
 import type { Annotation, ExportFormat } from '@/lib/api';
 import { formatRelative } from '@/lib/util';
 
+/**
+ * 侧栏的两个列表。
+ *
+ * 书签与批注在库里仍是同一张 `annotations` 表、靠 `type` 区分（不拆表，
+ * 见 docs/REQUIREMENTS-2026-10-11-bookmark-indicator.md 的 B13），但界面上**分成两个独立列表**：
+ * 各自计数、空状态、删除与跳转。
+ */
+export type AnnotationTab = 'highlight' | 'bookmark';
+
 interface Props {
   annotations: Annotation[];
+  /** 当前显示哪一个列表 */
+  tab: AnnotationTab;
+  onTabChange: (tab: AnnotationTab) => void;
   /** 正在导出时禁用按钮，避免连点 */
   exporting: boolean;
   onJump: (a: Annotation) => void;
@@ -12,7 +24,12 @@ interface Props {
   onClose: () => void;
 }
 
-/** 一条批注在列表里的样子：高亮显示色块 + 原文 + 笔记；书签只有一行。 */
+const TABS: { value: AnnotationTab; label: string }[] = [
+  { value: 'highlight', label: '批注' },
+  { value: 'bookmark', label: '书签' },
+];
+
+/** 一条记录在列表里的样子：高亮显示色块 + 原文 + 笔记；书签只有一行。 */
 function Row({
   item,
   onJump,
@@ -63,7 +80,7 @@ function Row({
 
       <button
         type="button"
-        aria-label="删除这条批注"
+        aria-label={isBookmark ? '删除这个书签' : '删除这条批注'}
         onClick={(e) => {
           e.stopPropagation();
           onDelete(item);
@@ -80,25 +97,48 @@ function Row({
 
 export default function AnnotationPanel({
   annotations,
+  tab,
+  onTabChange,
   exporting,
   onJump,
   onDelete,
   onExport,
   onClose,
 }: Props) {
-  const highlights = annotations.filter((a) => a.type === 'highlight').length;
-  const bookmarks = annotations.length - highlights;
+  // 书签与批注分开成两个列表（REQ-2026-10-11-07）：数据同表，界面分开。
+  const highlights = annotations.filter((a) => a.type === 'highlight');
+  const bookmarks = annotations.filter((a) => a.type === 'bookmark');
+  const list = tab === 'bookmark' ? bookmarks : highlights;
+  const countOf: Record<AnnotationTab, number> = {
+    highlight: highlights.length,
+    bookmark: bookmarks.length,
+  };
 
   return (
     <aside className="flex h-full w-80 flex-col border-l border-app-border bg-app-surface">
-      <header className="flex items-center justify-between border-b border-app-border px-4 py-3">
-        <div className="flex items-baseline gap-2">
-          <h2 className="text-sm text-app-fg">批注</h2>
-          {annotations.length > 0 && (
-            <span className="text-[10px] text-app-muted">
-              {highlights} 条高亮 · {bookmarks} 个书签
-            </span>
-          )}
+      <header className="flex items-center justify-between gap-2 border-b border-app-border px-3 py-2.5">
+        <div className="flex items-center gap-1" role="tablist" aria-label="批注与书签">
+          {TABS.map((t) => {
+            const active = t.value === tab;
+            return (
+              <button
+                key={t.value}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => onTabChange(t.value)}
+                className={
+                  'cursor-pointer rounded px-2.5 py-1 text-xs transition ' +
+                  (active ? 'bg-app-hover text-app-accent' : 'text-app-muted hover:text-app-fg')
+                }
+              >
+                {t.label}
+                {countOf[t.value] > 0 && (
+                  <span className="ml-1 tabular-nums opacity-70">{countOf[t.value]}</span>
+                )}
+              </button>
+            );
+          })}
         </div>
         <button
           type="button"
@@ -111,15 +151,25 @@ export default function AnnotationPanel({
       </header>
 
       <div className="flex-1 overflow-y-auto py-2">
-        {annotations.length === 0 ? (
+        {list.length === 0 ? (
           <p className="px-4 py-6 text-center text-xs text-app-muted">
-            还没有批注。
-            <br />
-            选中正文即可高亮，点顶栏的 ☆ 加书签。
+            {tab === 'bookmark' ? (
+              <>
+                还没有书签。
+                <br />
+                翻页模式下下拉，或点顶栏的 ☆ 添加。
+              </>
+            ) : (
+              <>
+                还没有批注。
+                <br />
+                选中正文即可高亮。
+              </>
+            )}
           </p>
         ) : (
           <ul className="px-2">
-            {annotations.map((a) => (
+            {list.map((a) => (
               <Row key={a.id} item={a} onJump={onJump} onDelete={onDelete} />
             ))}
           </ul>
