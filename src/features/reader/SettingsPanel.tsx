@@ -2,6 +2,7 @@ import {
   BOOKMARK_COLORS,
   type BookmarkColorName,
   CJK_MODE_CHOICES,
+  CONVERSION_CHOICES,
   type FlowMode,
   FONT_CHOICES,
   type RendererSettings,
@@ -135,6 +136,25 @@ export default function SettingsPanel({ settings, onChange, onReset, onClose }: 
           </div>
         </Row>
 
+        <Row label="简繁转换">
+          <div className="flex gap-2">
+            {CONVERSION_CHOICES.map((c) => {
+              const active = settings.conversion === c.value;
+              return (
+                <button
+                  key={c.value}
+                  type="button"
+                  title={c.hint}
+                  onClick={() => onChange({ conversion: c.value })}
+                  className={`${buttonBase} ${active ? 'border-amber-500/70 text-app-accent' : 'border-app-border text-app-muted hover:border-app-muted'}`}
+                >
+                  {c.label}
+                </button>
+              );
+            })}
+          </div>
+        </Row>
+
         <Row label="主题">
           <div className="flex gap-2">
             {(Object.keys(THEMES) as ThemeKey[]).map((k) => {
@@ -220,6 +240,31 @@ export default function SettingsPanel({ settings, onChange, onReset, onClose }: 
             })}
           </div>
         </Row>
+
+        {/* 宽屏只对单栏有意义：双栏再放宽只会让每栏宽到读不下去（REQ-2026-11-22-03）。 */}
+        {settings.maxColumnCount === 1 && (
+          <Row label="单栏宽度">
+            <div className="flex gap-2">
+              {[
+                { value: false, label: '标准', hint: '正文最宽 720px，两侧留白多' },
+                { value: true, label: '宽屏', hint: '正文铺满窗口，适合大屏' },
+              ].map((c) => {
+                const active = settings.wideScreen === c.value;
+                return (
+                  <button
+                    key={c.label}
+                    type="button"
+                    title={c.hint}
+                    onClick={() => onChange({ wideScreen: c.value })}
+                    className={`${buttonBase} ${active ? 'border-amber-500/70 text-app-accent' : 'border-app-border text-app-muted hover:border-app-muted'}`}
+                  >
+                    {c.label}
+                  </button>
+                );
+              })}
+            </div>
+          </Row>
+        )}
       </div>
 
       <footer className="border-t border-app-border p-4">

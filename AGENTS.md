@@ -167,7 +167,10 @@ myEpubReader/                     # 仓库目录（应用名是 Inkwell，二者
 ├── docs/
 │   ├── IMPLEMENTATION_PLAN.md    # 实现规划主文档
 │   ├── BACKLOG.md                # ★ 待办与已知问题（接手先看这份）
-│   └── REQUIREMENTS-2026-10-05.md # ★ 0.2.0 需求（8 条，动工前先看）
+│   ├── REQUIREMENTS-2026-10-05.md # ★ 0.2.0 需求（8 条）
+│   ├── REQUIREMENTS-2026-11-22-reading-ux.md # ★ 阅读交互 / 宽屏
+│   ├── REQUIREMENTS-2026-11-22-search-conversion.md # ★ 搜索 / 简繁
+│   └── TESTING-0.3.1.md           # 0.3.1 手测清单
 ├── personal/                     # ★ 私有层
 │   ├── config/app-identity.json  # 机器可读的应用标识
 │   ├── scripts/
@@ -209,16 +212,18 @@ myEpubReader/                     # 仓库目录（应用名是 Inkwell，二者
 
 > 阶段 0 完成后才可用。骨架尚未搭建时以下命令会失败。
 
-### 5.0 项目进度（2026-09-20）
+### 5.0 项目进度（2026-11-22）
 
 | 阶段 | 状态 |
 | --- | --- |
 | 阶段 0：环境与骨架 | ✅ 完成（双端出包跑通） |
 | 阶段 1：MVP 阅读器 | ✅ 完成，**用户已验收通过** |
-| 阶段 2：中文化 + 批注 + 搜索 | 🔄 进行中：中文排版 ✅、批注 ✅（高亮/笔记/书签/导出）、Android 真机适配 ✅；中文字体 / 简繁转换 / 全文搜索待做 |
+| 阶段 2：中文化 + 批注 + 搜索 | 🔄 进行中：中文排版 ✅、批注 ✅（高亮/笔记/书签/导出）、Android 真机适配 ✅、**简繁转换 ✅、单本全文搜索 ✅**；中文字体 / 跨书搜索待做 |
 | **0.2.0 增强批次** | ✅ **已实现**（App 白天/夜间、双击工具栏、页号角标、页边距修复、PDF 阅读）—— 见 `docs/BACKLOG.md` §2.6 与 `docs/REQUIREMENTS-2026-10-05.md` §八 |
 | **0.2.2 打开方式** | ✅ **已实现**（双击 / 「打开方式 → 砚池」epub 直接进阅读器；Android 打开+分享）—— 见 `docs/BACKLOG.md` §2.8 与 `docs/REQUIREMENTS-2026-10-10-open-file.md`。⚠️ Android 真机未验 |
 | **0.3.0 阅读体验批次** | ✅ **已实现并发布**（书签/批注拆分、页上书签缎带 + 下拉手势、章内页号角标；**翻页动效经用户决定取消**）—— 见 `docs/BACKLOG.md` §九与 `docs/REQUIREMENTS-2026-10-11-*.md`。⚠️ Android 真机未验 |
+| **阅读交互批次（2026-11-22）** | ✅ **已实现并 CDP 实测**（移动端工具栏只由双击中间呼出、滑动翻页距离兜底、桌面单栏宽屏）—— 见 `docs/BACKLOG.md` §十与 `docs/REQUIREMENTS-2026-11-22-reading-ux.md` |
+| **0.3.1 搜索与简繁（2026-11-22）** | ✅ **已实现并 CDP 实测**（单本全文搜索、繁→简 / 简→繁转换）—— 见 `docs/BACKLOG.md` §十二与 `docs/REQUIREMENTS-2026-11-22-search-conversion.md`。⚠️ Android 真机未验 |
 | 阶段 3 及以后 | ⏸️ 未开始 |
 
 **阶段 1 已交付的能力**：书库（导入/封面/搜索/排序/删除）、阅读器
@@ -260,6 +265,9 @@ myEpubReader/                     # 仓库目录（应用名是 Inkwell，二者
 
 | 产物 | 路径 | 大小 |
 | --- | --- | --- |
+| **Windows 安装包（0.3.1）** | `personal/out/Inkwell-0.3.1-win-x64-setup.exe` | **6.5 MB** |
+| **Android APK（0.3.1，arm64，手机用）** | `personal/out/Inkwell-0.3.1-arm64.apk` | **15.1 MB** |
+| **Android APK（0.3.1，universal，全架构）** | `personal/out/Inkwell-0.3.1-universal.apk` | **51.7 MB** |
 | **Windows 安装包（0.3.0）** | `personal/out/Inkwell-0.3.0-win-x64-setup.exe` | **6.1 MB** |
 | **Android APK（0.3.0，arm64，手机用）** | `personal/out/Inkwell-0.3.0-arm64.apk` | **14.0 MB** |
 | **Android APK（0.3.0，universal，全架构）** | `personal/out/Inkwell-0.3.0-universal.apk` | **47.7 MB** |

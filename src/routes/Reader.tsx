@@ -10,9 +10,11 @@ import {
   type BookInfo,
   type HighlightView,
   type RendererSettings,
+  type SearchEvent,
   THEMES,
   type TocItem,
 } from '@/features/reader/engine/types';
+import SearchPanel from '@/features/reader/SearchPanel';
 import SettingsPanel from '@/features/reader/SettingsPanel';
 import TocPanel from '@/features/reader/TocPanel';
 import {
@@ -50,6 +52,11 @@ const RIBBON_INSET_PX = 14;
  */
 const RIBBON_HEIGHT_PX = TOP_BAR_HEIGHT - 4;
 
+/** 引擎还没就绪时的空搜索：让面板安静地显示「没有找到」，而不是崩掉。 */
+async function* emptySearch(): AsyncGenerator<SearchEvent> {
+  yield { kind: 'done' };
+}
+
 export default function Reader() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -74,6 +81,7 @@ export default function Reader() {
   const [showToc, setShowToc] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showAnnotations, setShowAnnotations] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   /** 侧栏显示哪个列表：批注（高亮/笔记）还是书签（REQ-2026-10-11-07 拆分） */
   const [annotationTab, setAnnotationTab] = useState<AnnotationTab>('highlight');
   const [fraction, setFraction] = useState(0);
@@ -385,9 +393,14 @@ export default function Reader() {
           void engine.next();
           break;
         case 'Escape':
-          if (showToc || showSettings) {
+          if (showToc || showSettings || showAnnotations || showSearch) {
             setShowToc(false);
             setShowSettings(false);
+            setShowAnnotations(false);
+            if (showSearch) {
+              setShowSearch(false);
+              engineRef.current?.clearSearch();
+            }
           } else {
             navigate('/');
           }
@@ -398,7 +411,7 @@ export default function Reader() {
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [navigate, showToc, showSettings]);
+  }, [navigate, showToc, showSettings, showAnnotations, showSearch]);
 
   /**
    * 顶部/底部栏在无操作几秒后自动隐藏，把屏幕让给正文。
@@ -414,6 +427,23 @@ export default function Reader() {
   }, []);
 
   /**
+   * 指针活动 → 叫出工具栏。**触摸不参与**（REQ-2026-11-22-01）。
+   *
+   * 移动端只认「双击正文中间」这一种呼出方式：原来任何 pointerdown 都会 bump，
+   * 于是点一下右侧翻页区、甚至滑动起手都会把工具栏叫出来，很打扰阅读。
+   * 鼠标（桌面）保留旧行为：移动指针就显示，方便直接点按钮。
+   */
+  const bumpFromPointer = useCallback(
+    (e: PointerEvent) => {
+      // 只约束 Android（移动版）。Windows 触摸屏没有双击呼出，保留旧的「触摸即显示」，
+      // 免得那部分用户失去入口。
+      if (isAndroid() && e.pointerType === 'touch') return;
+      bump();
+    },
+    [bump],
+  );
+
+  /**
    * 显示 / 隐藏切换（双击正文中间区域触发，REQ-2026-10-05-01）。
    * 切到显示时同样开始计时，之后照旧自动隐藏。
    */
@@ -425,19 +455,37 @@ export default function Reader() {
   }, []);
   toggleBarsRef.current = toggleBars;
 
+  /** 关掉搜索面板：同时让引擎清掉书上的搜索描边。 */
+  function closeSearch() {
+    setShowSearch(false);
+    engineRef.current?.clearSearch();
+  }
+
+  /** 顶栏「搜索」：与目录 / 批注 / 设置互斥。 */
+  function toggleSearch() {
+    if (showSearch) {
+      closeSearch();
+      return;
+    }
+    setShowToc(false);
+    setShowSettings(false);
+    setShowAnnotations(false);
+    setShowSearch(true);
+  }
+
   useEffect(() => {
     bump(); // 刚进入时也启动计时
 
-    window.addEventListener('pointermove', bump);
-    window.addEventListener('pointerdown', bump);
+    window.addEventListener('pointermove', bumpFromPointer);
+    window.addEventListener('pointerdown', bumpFromPointer);
     window.addEventListener('keydown', bump);
     return () => {
       window.clearTimeout(barTimerRef.current);
-      window.removeEventListener('pointermove', bump);
-      window.removeEventListener('pointerdown', bump);
+      window.removeEventListener('pointermove', bumpFromPointer);
+      window.removeEventListener('pointerdown', bumpFromPointer);
       window.removeEventListener('keydown', bump);
     };
-  }, [bump]);
+  }, [bump, bumpFromPointer]);
 
   /**
    * 隐藏态屏蔽层的按下：这一整只手势被吞掉，只负责把工具栏叫出来。
@@ -697,6 +745,7 @@ export default function Reader() {
         <button
           type="button"
           onClick={() => {
+            closeSearch();
             setShowToc((v) => !v);
             setShowSettings(false);
             setShowAnnotations(false);
@@ -705,9 +754,19 @@ export default function Reader() {
         >
           目录
         </button>
+        {!isPdf && info?.fixedLayout !== true && (
+          <button
+            type="button"
+            onClick={toggleSearch}
+            className={`cursor-pointer rounded px-2 py-1 text-sm hover:bg-app-hover ${showSearch ? 'text-app-accent' : ''}`}
+          >
+            搜索
+          </button>
+        )}
         <button
           type="button"
           onClick={() => {
+            closeSearch();
             setShowAnnotations((v) => !v);
             setAnnotationTab('highlight');
             setShowToc(false);
@@ -720,6 +779,7 @@ export default function Reader() {
         <button
           type="button"
           onClick={() => {
+            closeSearch();
             setShowSettings((v) => !v);
             setShowToc(false);
             setShowAnnotations(false);
@@ -864,7 +924,7 @@ export default function Reader() {
           工具栏隐藏时盖在顶栏 / 底栏之上：按下先被它整只吞掉、只负责把工具栏叫出来，
           这样同一次手势的 mousedown / click 不会再落到刚显示出来的进度条或按钮上。
           z-[25]：压得住工具栏（z-20），又低于侧栏面板（z-30），不会挡住面板操作。 */}
-      {shieldActive && (
+      {shieldActive && !isAndroid() && (
         <>
           <div
             aria-hidden="true"
@@ -963,6 +1023,15 @@ export default function Reader() {
             onChange={updateSettings}
             onReset={resetSettings}
             onClose={() => setShowSettings(false)}
+          />
+        </div>
+      )}
+      {showSearch && (
+        <div className="absolute inset-y-0 right-0 z-30" style={{ top: 48 }}>
+          <SearchPanel
+            onSearch={(q) => engineRef.current?.search(q) ?? emptySearch()}
+            onSelect={(cfi) => void engineRef.current?.goTo(cfi)}
+            onClose={closeSearch}
           />
         </div>
       )}

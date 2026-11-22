@@ -1,7 +1,7 @@
 {
   "name": "inkwell",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "description": "砚池 (Inkwell) —— 个人自用的跨平台电子书阅读器",
   "scripts": {
@@ -19,7 +19,8 @@
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-fs": "^2",
     "@tauri-apps/plugin-opener": "^2",
-    "@tauri-apps/plugin-os": "^2",
+    "@tauri-apps/plugin-os": "^2.3.2",
+    "opencc-js": "^1.4.2",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-router-dom": "^7",

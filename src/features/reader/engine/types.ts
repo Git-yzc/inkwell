@@ -58,6 +58,15 @@ export type FlowMode = 'paginated' | 'scrolled';
 export type ThemeKey = 'light' | 'sepia' | 'dark';
 /** 中文排版的开关方式：auto = 按书籍自身的语言自动判断。 */
 export type CjkMode = 'auto' | 'on' | 'off';
+/**
+ * 简繁转换方向。
+ *
+ * - `t2s`：繁体原文 → 简体显示
+ * - `s2t`：简体原文 → 繁体显示
+ *
+ * 转换只改正文文字，不改书库标题、也不改数据库里的 CFI。
+ */
+export type ConversionMode = 'off' | 't2s' | 's2t';
 
 /** 阅读外观设置。 */
 export interface RendererSettings {
@@ -73,8 +82,17 @@ export interface RendererSettings {
   flow: FlowMode;
   /** 分栏数上限，双栏适合宽屏 */
   maxColumnCount: number;
+  /**
+   * 单栏宽屏模式：正文铺满窗口可用宽度（只对单栏生效）。
+   *
+   * 内核单栏默认把行宽限制在 720px，宽屏上两侧会留出大片空白；
+   * 打开后把行宽上限放到「不限制」，由容器宽度决定。
+   */
+  wideScreen: boolean;
   /** 中文排版（首行缩进、行首禁则、中西文间距） */
   cjkTypography: CjkMode;
+  /** 简繁转换方向（全局开关，见 REQ-2026-11-22-02） */
+  conversion: ConversionMode;
   /** 页上书签图案的颜色（固定色，不随阅读主题变色，见 REQ-2026-10-11-04） */
   bookmarkColor: BookmarkColorName;
 }
@@ -87,7 +105,9 @@ export const DEFAULT_SETTINGS: RendererSettings = {
   theme: 'light',
   flow: 'paginated',
   maxColumnCount: 1,
+  wideScreen: false,
   cjkTypography: 'auto',
+  conversion: 'off',
   bookmarkColor: 'blue',
 };
 
@@ -166,6 +186,17 @@ export const CJK_MODE_CHOICES: { label: string; value: CjkMode; hint: string }[]
   { label: '关', value: 'off', hint: '沿用书籍自带排版' },
 ];
 
+/** 简繁转换选项，供设置面板渲染。 */
+export const CONVERSION_CHOICES: {
+  label: string;
+  value: ConversionMode;
+  hint: string;
+}[] = [
+  { label: '关', value: 'off', hint: '保留书籍原文' },
+  { label: '繁→简', value: 't2s', hint: '繁体原文显示为简体' },
+  { label: '简→繁', value: 's2t', hint: '简体原文显示为繁体' },
+];
+
 /** 主题配色。正文容器与页面背景都取这里的值，保证观感一致。 */
 export const THEMES: Record<ThemeKey, { name: string; bg: string; fg: string; muted: string }> = {
   light: { name: '浅色', bg: '#ffffff', fg: '#1c1c1c', muted: '#666666' },
@@ -183,3 +214,22 @@ export const FONT_CHOICES: { label: string; value: string }[] = [
   },
   { label: '楷体', value: 'KaiTi, "Kaiti SC", STKaiti, serif' },
 ];
+
+/** 搜索命中里的一段上下文（pre / match / post）。 */
+export interface SearchExcerpt {
+  pre: string;
+  match: string;
+  post: string;
+}
+
+/** 一条命中：CFI 用于跳转，excerpt 用于列表展示。 */
+export interface SearchHit {
+  cfi: string;
+  excerpt: SearchExcerpt;
+}
+
+/** 引擎按章节分批交回的搜索结果。 */
+export type SearchEvent =
+  | { kind: 'progress'; progress: number }
+  | { kind: 'results'; label: string; items: SearchHit[] }
+  | { kind: 'done' };

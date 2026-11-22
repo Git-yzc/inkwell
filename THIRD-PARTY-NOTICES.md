@@ -6,7 +6,7 @@
 > 本文件列出会被打包进**发行版二进制**（Windows 安装包 / Android APK）的第三方组件。
 > 按 MIT、BSD-3-Clause、Apache-2.0 的要求，分发二进制时需保留相应的版权与许可声明。
 
-最后核对：2026-09-19
+最后核对：2026-11-22
 
 ---
 
@@ -48,6 +48,17 @@ SOFTWARE.
 > foliate-js 自带示例 `reader.js` 的 `getCSS()` 并做了改写。
 > 该部分同样适用上面的 MIT 许可。
 
+### opencc-js
+
+- 用途：简繁转换（繁→简 / 简→繁）
+- 来源：https://github.com/nk2028/opencc-js （v1.4.2，字典来自 OpenCC）
+- 许可证：**MIT AND Apache-2.0**
+- 版权：Copyright (c) 2020-2021 The nk2028 Project；字典数据版权归 OpenCC 项目
+- 完整文本：`node_modules/opencc-js/LICENSE`、`node_modules/opencc-js/LICENSES/Apache-2.0.txt`
+
+> MIT 部分允许自由使用、修改、分发，需保留版权与许可声明；Apache-2.0 部分
+> （OpenCC 字典数据）需保留 NOTICE / 许可证文本。发行版中已随包保留本声明。
+
 ### zip.js（随 foliate-js 一起内置）
 
 - 位置：`packages/foliate-js/vendor/zip.js`
@@ -83,6 +94,7 @@ BSD-3-Clause 要求分发时保留版权声明、条件列表与免责声明。
 | zustand | MIT |
 | @tauri-apps/api | Apache-2.0 OR MIT |
 | @tauri-apps/plugin-dialog / -fs / -opener / -os | MIT OR Apache-2.0 |
+| opencc-js | MIT AND Apache-2.0 |
 
 ### 构建期（npm，不进入发行版）
 
@@ -122,5 +134,5 @@ BSD-3-Clause 要求分发时保留版权声明、条件列表与免责声明。
 | 组件 | 说明 |
 | --- | --- |
 | Readest（AGPL-3.0） | 仅作为架构参考阅读，**未复制任何代码**。见 `AGENTS.md` §1.1 |
-| PDF.js（Apache-2.0） | 打包时已用桩替换（`pdf-stub.js`），未进入发行版 |
+| PDF.js（Apache-2.0） | **已进入发行版**（随 foliate-js 的 pdf.js 一起打包，资源在 `dist/pdfjs/`）；许可证文本见 `packages/foliate-js/vendor/pdfjs/` 与 `dist/pdfjs/` |
 | Foliate（GTK 应用，GPL-3.0） | 未使用 |

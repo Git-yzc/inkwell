@@ -26,6 +26,11 @@ declare module 'foliate-js/view.js' {
     resolveNavigation(target: string | number): Promise<{ index: number; anchor: unknown } | null>;
     getSectionFractions(): number[];
 
+    /** 全书搜索：按章节异步交回 progress / results，最后交回 'done'。 */
+    search(opts: { query: string }): AsyncGenerator<FoliateSearchEvent>;
+    /** 清掉搜索结果的描边（不改变当前阅读位置）。 */
+    clearSearch(): void;
+
     /**
      * 加一条批注。`annotation.value` 是 CFI；`remove` 为 true 时是删除。
      *
@@ -85,7 +90,27 @@ declare module 'foliate-js/view.js' {
     setStyles?: (css: string) => void;
     /** 当前渲染中的书籍文档（分页渲染器下只有一份）。 */
     getContents?: () => { index: number; doc: Document }[];
+    /** 分页渲染器当前的页码（从 0 开始）；滚动渲染器没有这个属性。 */
+    page?: number;
+    /** 重新分页（正文文字变化后调用）。 */
+    render?: () => void;
   }
+
+  export interface FoliateSearchExcerpt {
+    pre: string;
+    match: string;
+    post: string;
+  }
+
+  export interface FoliateSearchItem {
+    cfi: string;
+    excerpt: FoliateSearchExcerpt;
+  }
+
+  export type FoliateSearchEvent =
+    | { progress: number }
+    | { label: string; subitems: FoliateSearchItem[] }
+    | 'done';
 }
 
 declare module 'foliate-js/overlayer.js' {

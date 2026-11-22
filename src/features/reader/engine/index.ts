@@ -23,11 +23,18 @@ import type { FoliateLocation, FoliateTocItem, View } from 'foliate-js/view.js';
 
 import { adaptAuthorColors } from './author-colors';
 import {
+  applyConversion,
+  convertDisplay,
+  convertQueryForSource,
+  restoreConversion,
+} from './conversion';
+import {
   type BookInfo,
   type HighlightView,
   highlightColor,
   type ReaderLocation,
   type RendererSettings,
+  type SearchEvent,
   type SelectionInfo,
   THEMES,
   type TocItem,
@@ -93,6 +100,35 @@ const DOUBLE_TAP_MS = 320;
 const DOUBLE_TAP_SLOP = 32;
 /** 双击清掉选区后，多久之内忽略选区回调（免得顺手弹出批注操作栏）。 */
 const DOUBLE_TAP_SELECTION_MUTE_MS = 600;
+
+/**
+ * 单栏行宽上限（px）。与内核 paginator.js 的 `--_max-inline-size: 720px` 默认值一致。
+ *
+ * 内核把正文网格的最大宽度算成 `max-inline-size × 分栏数`，所以单栏在宽屏上
+ * 只占中间 720px 宽，两侧会留出大片空白（不是页边距设置造成的）。
+ */
+const DEFAULT_MAX_INLINE_SIZE = '720px';
+
+/**
+ * 宽屏模式的行宽上限（px）。
+ *
+ * 取一个远大于任何屏幕的数值，等于「不设上限」：网格里的 `minmax(0, …)`
+ * 会把它压回容器可用宽度，正文因此铺满两侧；内核仍按这个宽度算列宽，
+ * 不会真的按 100000px 排版。
+ */
+const WIDE_MAX_INLINE_SIZE = '100000px';
+
+/**
+ * 横向滑动翻页的触发距离：视口宽度的 18%，且不小于 36px。
+ *
+ * 内核 `paginator.js` 的 `snap()` **只看松手瞬间的速度**（`vx`），不看拖了多远：
+ * 慢慢拖过 20% 再停住，速度接近 0，它就会原地弹回去，手感非常「粘」。
+ * 这里补一条「按距离判定」的兜底，让慢慢拖也能翻页。
+ */
+const SWIPE_TURN_RATIO = 0.18;
+const SWIPE_TURN_MIN_PX = 36;
+/** 横向位移至少是竖向的多少倍，才算翻页滑动（避免和下拉书签手势抢）。 */
+const SWIPE_HORIZONTAL_RATIO = 1.2;
 
 /** 滚轮累积多少像素才翻一页。 */
 const WHEEL_STEP = 50;
@@ -322,6 +358,10 @@ export class ReaderEngine {
   #muteSelectionUntil = 0;
   #pullDoc: Document | null = null;
   #pullStart: { x: number; y: number } | null = null;
+  /** 本轮手势开始时的页码：用来判断内核是不是已经靠速度翻过页了 */
+  #pullStartPage = 0;
+  /** 多指、划词或已判定为下拉时，横向滑动不再参与翻页 */
+  #swipeDisabled = false;
   #pullPhase: 'idle' | 'pulling' | 'armed' = 'idle';
   /** 一次手势只触发一次，松手才复位 */
   #pullFired = false;
@@ -339,6 +379,10 @@ export class ReaderEngine {
   #sectionIndex = 0;
   /** 当前书的高亮，key 是 CFI（foliate 也拿 CFI 当 overlayer 的 key） */
   #highlights = new Map<string, HighlightView>();
+  /** 搜索序号：新搜索 / 主动取消都会 +1，旧的异步循环看到不一致就停 */
+  #searchToken = 0;
+  /** 主动取消搜索时置 true，让还在跑的旧循环负责把半截高亮清掉 */
+  #searchCancelled = false;
 
   constructor(host: HTMLElement, settings: RendererSettings) {
     this.#settings = settings;
@@ -367,6 +411,7 @@ export class ReaderEngine {
       this.#fixedLayout = this.#view.isFixedLayout === true;
       // 换章节时内核会重建 iframe 文档，样式、滚轮与选区监听都要重新挂
       this.#applyRendererAttributes();
+      this.#applyConversion(detail?.doc);
       this.#adaptAuthorColors(detail?.doc);
       this.#bindWheel(detail?.doc);
       this.#bindDoubleTap(detail?.doc);
@@ -609,6 +654,79 @@ export class ReaderEngine {
     await this.#view.goToFraction(Math.min(1, Math.max(0, fraction)));
   }
 
+  /* ---------------------------------------------------------------- 搜索 */
+
+  /**
+   * 全书搜索（REQ-2026-11-22-01）。
+   *
+   * 内核会逐章加载文档并搜索，按章节把结果交回来；这里只做三件事：
+   * 1. 把用户输入转成「原文那一侧」的写法（繁简互搜）；
+   * 2. 把章节名与摘录转成当前显示文字；
+   * 3. 用序号支持取消 —— 关掉搜索面板时旧的异步循环要能停下。
+   *
+   * 搜索结果的高亮由内核自己画（`view.search` 内部会 addAnnotation），
+   * 关闭面板时调 `clearSearch()` 一并清掉。
+   */
+  async *search(query: string): AsyncGenerator<SearchEvent> {
+    const trimmed = query.trim();
+    if (!this.#opened || this.#fixedLayout || !trimmed) {
+      this.clearSearch();
+      yield { kind: 'done' };
+      return;
+    }
+
+    const mode = this.#settings?.conversion ?? 'off';
+    const sourceQuery = convertQueryForSource(trimmed, mode);
+    const token = ++this.#searchToken;
+    this.#searchCancelled = false;
+
+    const iter = this.#view.search({ query: sourceQuery });
+    for await (const item of iter) {
+      if (token !== this.#searchToken) {
+        if (this.#searchCancelled) {
+          this.#view.clearSearch();
+          this.#searchCancelled = false;
+        }
+        return;
+      }
+
+      if (item === 'done') {
+        yield { kind: 'done' };
+        return;
+      }
+      if ('progress' in item) {
+        yield { kind: 'progress', progress: Math.min(1, Math.max(0, item.progress)) };
+        continue;
+      }
+
+      yield {
+        kind: 'results',
+        label: convertDisplay(item.label, mode),
+        items: item.subitems.map(({ cfi, excerpt }) => ({
+          cfi,
+          excerpt: {
+            pre: convertDisplay(excerpt.pre, mode),
+            match: convertDisplay(excerpt.match, mode),
+            post: convertDisplay(excerpt.post, mode),
+          },
+        })),
+      };
+    }
+    yield { kind: 'done' };
+  }
+
+  /** 关掉搜索面板：停掉还在跑的搜索循环，并清掉书上的描边。 */
+  clearSearch(): void {
+    this.#searchToken++;
+    this.#searchCancelled = true;
+    if (!this.#opened) return;
+    try {
+      this.#view.clearSearch();
+    } catch {
+      // 文档已卸载时忽略
+    }
+  }
+
   /** 章节起点在全书中的进度，用于进度条刻度（暂未使用，留给阶段 2）。 */
   sectionFractions(): number[] {
     return this.#opened ? this.#view.getSectionFractions() : [];
@@ -635,6 +753,8 @@ export class ReaderEngine {
   applySettings(settings: RendererSettings): void {
     this.#settings = settings;
     this.#applyRendererAttributes();
+    // 简繁转换会改正文文字长度（虽然字典基本等长），换完必须让内核重新分页
+    this.#applyConversion();
     // 主题换了，作者点名的字色要跟着重算（浅色主题下是「还原」）
     this.#adaptAuthorColors();
   }
@@ -655,6 +775,34 @@ export class ReaderEngine {
     adaptAuthorColors(target, THEMES[s.theme].bg);
   }
 
+  /**
+   * 按设置给正文做简繁转换（REQ-2026-11-22-02）。
+   *
+   * 换章节、切设置都要重来：前者内核重建了文档，后者转换方向变了。
+   * 转换会改文字，虽然字典基本等长，仍要让内核重新分页一次，否则列高/页数可能还是旧的。
+   */
+  #applyConversion(doc?: Document | null): void {
+    const s = this.#settings;
+    if (!s || this.#fixedLayout) return;
+    const target = doc ?? this.#view.renderer?.getContents?.()[0]?.doc;
+    if (!target) return;
+
+    const changed =
+      s.conversion === 'off'
+        ? restoreConversion(target)
+        : applyConversion(target, s.conversion);
+    if (!changed) return;
+
+    // 放到下一帧：load 事件里内核还在 #display 的中途，立刻 render 会打乱它的锚点。
+    requestAnimationFrame(() => {
+      try {
+        this.#view.renderer?.render?.();
+      } catch {
+        // 文档已卸载（快速换章）时忽略
+      }
+    });
+  }
+
   #applyRendererAttributes(): void {
     const s = this.#settings;
     const renderer = this.#view.renderer;
@@ -667,6 +815,11 @@ export class ReaderEngine {
     // 内核自己的默认值就是 48px，且 #beforeRender 是 parseFloat，带 px 不受影响。
     renderer.setAttribute('margin', `${s.margin}px`);
     renderer.setAttribute('max-column-count', String(s.maxColumnCount));
+    // 宽屏只对单栏生效；双栏仍用内核默认的 720px 行宽，否则两栏会宽到没法读。
+    renderer.setAttribute(
+      'max-inline-size',
+      s.wideScreen && s.maxColumnCount < 2 ? WIDE_MAX_INLINE_SIZE : DEFAULT_MAX_INLINE_SIZE,
+    );
 
     // setStyles 会把 CSS 注入书籍文档；fixed-layout（漫画）不套用文字排版
     if (this.#view.book?.rendition?.layout !== 'pre-paginated') {
@@ -761,7 +914,11 @@ export class ReaderEngine {
     if (this.#settings?.flow !== 'paginated' || e.touches.length !== 1) return;
     const t = e.touches[0];
     if (!t) return;
-    this.#pullStart = { x: t.clientX, y: t.clientY };
+    // 用 screen 坐标而不是 client 坐标：横向拖动时内核会同步滚动正文，
+    // iframe 里的 clientX 会跟着内容一起移动（几乎不变），量不出手指真正走了多远。
+    this.#pullStart = { x: t.screenX, y: t.screenY };
+    this.#pullStartPage = this.#view.renderer?.page ?? 0;
+    this.#swipeDisabled = false;
     this.#pullFired = false;
     this.#pullPhase = 'idle';
     this.#pullSuppressed = false;
@@ -772,23 +929,33 @@ export class ReaderEngine {
     const start = this.#pullStart;
     if (!start || this.#pullFired || this.#settings?.flow !== 'paginated') return;
 
-    const t = e.touches[0];
-    if (!t) return;
-
-    // 正在选词：用户拖的是选择手柄，不是下拉
-    if (this.#selectionDoc?.defaultView?.getSelection()?.isCollapsed === false) {
+    // 多指（缩放）不参与下拉，也不参与横向翻页
+    if (e.touches.length > 1) {
+      this.#swipeDisabled = true;
       this.#pullPhase = 'idle';
       this.#emitPull(0);
       return;
     }
 
-    const dy = t.clientY - start.y;
-    const dx = Math.abs(t.clientX - start.x);
+    const t = e.touches[0];
+    if (!t) return;
+
+    // 正在选词：用户拖的是选择手柄，不是下拉
+    if (this.#selectionDoc?.defaultView?.getSelection()?.isCollapsed === false) {
+      this.#swipeDisabled = true;
+      this.#pullPhase = 'idle';
+      this.#emitPull(0);
+      return;
+    }
+
+    const dy = t.screenY - start.y;
+    const dx = Math.abs(t.screenX - start.x);
 
     // 一旦判定是「竖直下拉」，就把这一轮手势从内核手里拦下来：
     // 内核会 scrollBy(dx) + snap(vx)，正是页面乱晃 / 误翻页的来源。
     if (dy > PULL_SUPPRESS_PX && dy > dx * PULL_VERTICAL_RATIO) {
       this.#pullSuppressed = true;
+      this.#swipeDisabled = true;
       e.stopPropagation();
       e.preventDefault();
     }
@@ -806,6 +973,35 @@ export class ReaderEngine {
 
   #onPullEnd = (e: TouchEvent): void => {
     const fire = this.#pullPhase === 'armed' && !this.#pullFired;
+
+    // 横向滑动翻页：内核只看松手速度、不看距离（见 SWIPE_TURN_RATIO 的注释）。
+    // 慢慢拖过一小段再停住时，它会把页面弹回原处；这里改成按距离补一次翻页。
+    let swipe: -1 | 0 | 1 = 0;
+    const start = this.#pullStart;
+    const touch = e.changedTouches[0];
+    if (e.type === 'touchend' && !fire && start && touch && !this.#swipeDisabled) {
+      const dx = start.x - touch.screenX;
+      const dy = start.y - touch.screenY;
+      const threshold = Math.max(
+        SWIPE_TURN_MIN_PX,
+        (this.#view.clientWidth || window.innerWidth) * SWIPE_TURN_RATIO,
+      );
+      const page = this.#view.renderer?.page ?? 0;
+      // 拖过一半时内核算出的 page 已经变了：让它自己 snap，别再 next() 跳两页
+      if (
+        Math.abs(dx) >= threshold &&
+        Math.abs(dx) > Math.abs(dy) * SWIPE_HORIZONTAL_RATIO &&
+        page === this.#pullStartPage
+      ) {
+        // 必须把 touchend 拦下来，否则内核还会拿旧的横向速度再 snap 一次
+        e.stopPropagation();
+        e.preventDefault();
+        // RTL 书的方向相反：手指往左是「上一页」
+        const rtl = this.#view.book?.dir === 'rtl';
+        swipe = (rtl ? dx < 0 : dx > 0) ? 1 : -1;
+      }
+    }
+
     // 拦过的这一轮，结束事件也不能让内核收到 —— 否则它会拿旧的横向速度去 snap 翻页
     if (this.#pullSuppressed) {
       this.#pullSuppressed = false;
@@ -818,6 +1014,7 @@ export class ReaderEngine {
     // 先让 UI 回弹，再触发增删；两者互不依赖
     this.#emitPull(0);
     if (fire) for (const fn of this.#pullTriggerListeners) fn();
+    else if (swipe !== 0) void (swipe > 0 ? this.next() : this.prev());
   };
 
   /* ------------------------------------------------------ 双击切换工具栏 */
