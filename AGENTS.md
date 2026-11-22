@@ -223,7 +223,7 @@ myEpubReader/                     # 仓库目录（应用名是 Inkwell，二者
 | **0.2.2 打开方式** | ✅ **已实现**（双击 / 「打开方式 → 砚池」epub 直接进阅读器；Android 打开+分享）—— 见 `docs/BACKLOG.md` §2.8 与 `docs/REQUIREMENTS-2026-10-10-open-file.md`。⚠️ Android 真机未验 |
 | **0.3.0 阅读体验批次** | ✅ **已实现并发布**（书签/批注拆分、页上书签缎带 + 下拉手势、章内页号角标；**翻页动效经用户决定取消**）—— 见 `docs/BACKLOG.md` §九与 `docs/REQUIREMENTS-2026-10-11-*.md`。⚠️ Android 真机未验 |
 | **阅读交互批次（2026-11-22）** | ✅ **已实现并 CDP 实测**（移动端工具栏只由双击中间呼出、滑动翻页距离兜底、桌面单栏宽屏）—— 见 `docs/BACKLOG.md` §十与 `docs/REQUIREMENTS-2026-11-22-reading-ux.md` |
-| **0.3.1 搜索与简繁（2026-11-22）** | ✅ **已实现并 CDP 实测**（单本全文搜索、繁→简 / 简→繁转换）—— 见 `docs/BACKLOG.md` §十二与 `docs/REQUIREMENTS-2026-11-22-search-conversion.md`。⚠️ Android 真机未验 |
+| **0.3.1 搜索与简繁（2026-11-22）** | ✅ **已实现、CDP 实测并发布**（阅读交互、单本全文搜索、繁→简 / 简→繁转换）—— 见 `docs/BACKLOG.md` §十 / §十二。⚠️ Android 真机未验 |
 | 阶段 3 及以后 | ⏸️ 未开始 |
 
 **阶段 1 已交付的能力**：书库（导入/封面/搜索/排序/删除）、阅读器

@@ -1025,6 +1025,9 @@ WebDAV 或局域网 HTTP，同步阅读进度（CFI）、批注、设置。
 > 需求、决策与实测全文见
 > [`docs/REQUIREMENTS-2026-11-22-search-conversion.md`](REQUIREMENTS-2026-11-22-search-conversion.md)。
 > 本轮把版本从 0.3.0 升到 **0.3.1**，并新引入 `opencc-js@1.4.2`（MIT AND Apache-2.0）。
+>
+> 📦 **已发布**：[GitHub Release v0.3.1](https://github.com/Git-yzc/inkwell/releases/tag/v0.3.1)
+> （Windows 安装包 + arm64 APK + universal APK）。
 
 ### ① 单本全文搜索
 
